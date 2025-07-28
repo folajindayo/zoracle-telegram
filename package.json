@@ -1,0 +1,29 @@
+{
+  "name": "zoracle-telegram-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for Zoracle creator activity notifications",
+  "main": "zoracleBot.js",
+  "scripts": {
+    "start": "node zoracleBot.js",
+    "dev": "nodemon zoracleBot.js",
+    "debug": "NODE_DEBUG=telegram-bot-api node zoracleBot.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.3",
+    "node-telegram-bot-api": "^0.61.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "private": true,
+  "keywords": [
+    "telegram",
+    "bot",
+    "zoracle",
+    "cryptocurrency",
+    "notifications"
+  ]
+} 
