@@ -1,19 +1,26 @@
 {
-  "name": "zoracle-telegram-bot",
+  "name": "base-chain-monitor-bot",
   "version": "1.0.0",
-  "description": "Telegram bot for Zoracle creator activity notifications",
-  "main": "zoracleBot.js",
+  "description": "Telegram bot for Base blockchain token monitoring with Zora content focus",
+  "main": "index.js",
   "scripts": {
-    "start": "node zoracleBot.js",
-    "dev": "nodemon zoracleBot.js",
-    "debug": "NODE_DEBUG=telegram-bot-api node zoracleBot.js"
+    "start": "node index.js",
+    "monitor": "node baseMonitor.js",
+    "dev": "nodemon index.js",
+    "debug": "NODE_DEBUG=telegram-bot-api node index.js"
   },
   "dependencies": {
-    "dotenv": "^16.0.3",
-    "node-telegram-bot-api": "^0.61.0"
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "ethers": "^5.7.2",
+    "node-telegram-bot-api": "^0.63.0",
+    "speakeasy": "^2.0.0",
+    "qrcode": "^1.5.3",
+    "paraswap-sdk": "^6.4.2",
+    "moment": "^2.29.4"
   },
   "devDependencies": {
-    "nodemon": "^2.0.22"
+    "nodemon": "^3.0.1"
   },
   "engines": {
     "node": ">=16.0.0"
@@ -22,8 +29,10 @@
   "keywords": [
     "telegram",
     "bot",
-    "zoracle",
+    "base",
     "cryptocurrency",
-    "notifications"
+    "zora",
+    "nft",
+    "monitoring"
   ]
 } 

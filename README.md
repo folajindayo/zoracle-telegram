@@ -1,53 +1,63 @@
 # Zoracle Telegram Bot
 
-This repository contains the Zoracle Telegram Bot and related components for monitoring creator activity on the Zora protocol and sending notifications to users via Telegram.
+Zoracle is a Telegram bot for trading Zora content tokens on Base blockchain with advanced features including wallet management, swap engine, portfolio tracking, content discovery, alerts, and copy-trading.
 
-## Repository Structure
+## Features
 
-- **Root Directory**: Contains the Node.js Telegram bot files
-  - `zoracleBot.js`: The main bot script
-  - `package.json`: Dependencies and scripts for the bot
-  - `.env`: Environment variables (API keys and tokens)
+### Wallet Management
+- Generate/import Base-network Ethereum wallets (via seed phrase or private key)
+- Encrypted local storage with PIN/passphrase
+- Optional 2FA for sensitive actions
 
-- **frontend/**: Frontend components that integrate with the Telegram bot
-  - **components/**: React components
-    - `TelegramConnectSettings.tsx`: UI for connecting Telegram to Zoracle
-    - `CopyTradeListener.tsx`: Component that listens for creator activity and dispatches notifications
-    - `CreatorMonitoringSettings.tsx`: UI for managing creator activity monitoring settings
-  - **services/**: 
-    - `telegramService.ts`: Service for interacting with Telegram API
-  - **hooks/**: 
-    - `useAlchemyCopyTradeMonitor.ts`: Hook for monitoring creator activity via Alchemy API
-    - `useLocalStorage.ts`: Hook for managing state in localStorage
+### In-Chat Swap Engine
+- Buy/sell any Zora content token using Base-native ETH (or bridged USDC)
+- Percent-based and fixed-amount commands (`/buy TOKEN 10%`, `/sell TOKEN 5`)
+- Limit orders, stop-loss, take-profit with on-chain order placement
 
-## Setup and Usage
+### Smart Routing & MEV Protection
+- Integration with Paraswap as DEX-aggregator to source best price across Base DEXes
+- Anti-sandwich routing: split large orders, rotate relayers, dynamic gas-tip control
 
-### Telegram Bot
+### Portfolio Dashboard
+- Show holdings above user-configurable thresholds
+- Cost basis, P&L, and real-time USD valuation
+- Drill-down per token: trade history, on-chain TXIDs, mini-charts
 
-1. Navigate to the root directory
-2. Create a `.env` file with your Telegram bot token:
-   ```
-   TELEGRAM_BOT_TOKEN=your_bot_token
-   NODE_ENV=production
-   ```
-3. Install dependencies: `npm install`
-4. Start the bot: `npm start`
+### Content-Coin Discovery
+- Auto-index Zora content coins on Base by querying Zora's subgraph/API
+- Search by content metadata (title, creator) or token address
+- "New" feed (coins minted in last 24 hrs) and "Trending" feed (volume/holder spikes)
 
-### Frontend Integration
+### Alerts & Notifications
+- Price-threshold, liquidity-change, and whale-swap alerts for any token/watchlist
+- Content-specific alerts (e.g., when a creator mints a new coin; when royalty settings change)
 
-The frontend components are designed to be integrated into a React application. They provide:
+### Watchlists & Copy-Trading
+- User-defined watchlists with grouped alerts
+- "Mirror" feature: automatically replicate another wallet's trades (subject to slippage guard)
 
-1. UI for connecting users' Telegram accounts to Zoracle
-2. Monitoring settings for creator activity
-3. Automatic notification dispatch when activity is detected
+### Help & Support
+- `/help` for command reference, inline tips, and first-time onboarding wizard
+- Sandbox/testnet mode for risk-free practice
 
-## Bot Commands
+## Installation
 
-- `/start your_wallet_address` - Connect a wallet to receive notifications
-- `/status` - Check connection status
-- `/chatid` - Get the current Telegram chat ID
-- `/help` - Display help information
+### Prerequisites
+- Node.js v16+
+- Telegram Bot Token (from BotFather)
+- Alchemy API Key for Base network
+- Paraswap API Key (optional, for better swap rates)
 
-## Security Note
+### Setup
+1. Clone the repository
+```bash
+git clone https://github.com/yourusername/zoracle-telegram.git
+cd zoracle-telegram
+```
 
-Never commit the `.env` file with actual API keys or tokens. The provided files may include placeholder values that should be replaced with your own keys. 
+2. Install dependencies
+```bash
+npm install
+```
+
+3. Create a `.env` file with the following variables:
