@@ -1,0 +1,22 @@
+{
+  "address": "0x364e53003286E51B5BEb0A657b87b185C81dc4a5",
+  "encryptedPrivateKey": "88fa8437dc9c121c3027a30a91ce3c8bb0eeb50bb52da144353369c3e74d27e816c051b0f61959996f73afe6fbc946d048b90ecfcc884e9e3b0ec5dbfdde69ba5d148a7678ee79f6bb59c24fce6f9d64",
+  "iv": "cfe3fa82ab9c634189e72d43cef3fd66",
+  "salt": "a93cfc4a29bd6be79a2d4452475f54c6",
+  "keyHash": "72254dc294499ac8593a3bf9aaff193c2a9ceb5bd13b037a0176cdc01b55e912",
+  "pinHash": "d08c8dd237ea78e8a2448b25d18c2b51d314ded4526119962255765317c93da7",
+  "pinSalt": "8fc17b1428f11d7c977ed156c9a6faaf",
+  "twoFactorEnabled": false,
+  "twoFactorSecret": "GQ3F4R2UERUVCKJTJJGTIU3BNVKGSTSGK5UDMPTLHB5G6ZKPJZPA",
+  "twoFactorBackupCodes": [
+    "8479B67C",
+    "85D7BB7B",
+    "0132E7A5",
+    "63B97195",
+    "A9397C05",
+    "22A84C0F",
+    "6B2FEB24",
+    "EA6BF157"
+  ],
+  "createdAt": 1753839754882
+}

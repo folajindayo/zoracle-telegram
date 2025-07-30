@@ -1,19 +1,57 @@
 {
   "name": "zoracle-telegram-bot",
   "version": "1.0.0",
-  "description": "Telegram bot for Zoracle creator activity notifications",
-  "main": "zoracleBot.js",
+  "description": "Telegram bot for Base blockchain token monitoring with Zora content focus",
+  "main": "dist/index.js",
+  "type": "module",
   "scripts": {
-    "start": "node zoracleBot.js",
-    "dev": "nodemon zoracleBot.js",
-    "debug": "NODE_DEBUG=telegram-bot-api node zoracleBot.js"
+    "build": "tsc",
+    "start": "npm run build && ./scripts/start-with-env.sh",
+    "dev": "ts-node-esm -r dotenv/config src/run.ts",
+    "debug": "NODE_DEBUG=telegram-bot-api ts-node-esm -r dotenv/config src/run.ts",
+    "kill-bot": "pkill -f 'node.*run.js' || pkill -f 'ts-node.*run.ts' || echo 'No bot instances running' && curl -s \"https://api.telegram.org/bot$(grep TELEGRAM_BOT_TOKEN .env | cut -d= -f2)/deleteWebhook?drop_pending_updates=true\" > /dev/null",
+    "generate-key": "ts-node-esm -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+    "db:init": "ts-node-esm -r dotenv/config src/database/init.ts",
+    "db:seed": "ts-node-esm -r dotenv/config scripts/seed-db.ts",
+    "db:test": "ts-node-esm -r dotenv/config scripts/test-mongodb.ts",
+    "lint": "eslint src/ --ext .ts",
+    "lint:fix": "eslint src/ --ext .ts --fix",
+    "test": "jest"
   },
   "dependencies": {
-    "dotenv": "^16.0.3",
-    "node-telegram-bot-api": "^0.61.0"
+    "@coinbase/cdp-sdk": "^1.30.0",
+    "@velora-dex/sdk": "^8.1.0",
+    "axios": "^1.6.2",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.6.1",
+    "dotenv-expand": "^10.0.0",
+    "ethers": "^5.7.2",
+    "fs-extra": "^11.2.0",
+    "install": "^0.13.0",
+    "moment": "^2.30.1",
+    "mongoose": "^8.0.3",
+    "node-telegram-bot-api": "^0.63.0",
+    "qrcode": "^1.5.3",
+    "speakeasy": "^2.0.0",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "nodemon": "^2.0.22"
+    "@types/fs-extra": "^11.0.4",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.1.0",
+    "@types/node-telegram-bot-api": "^0.64.9",
+    "@types/qrcode": "^1.5.5",
+    "@types/sequelize": "^4.28.20",
+    "@types/speakeasy": "^2.0.10",
+    "@types/uuid": "^10.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.38.0",
+    "@typescript-eslint/parser": "^8.38.0",
+    "eslint": "^8.55.0",
+    "jest": "^30.0.5",
+    "nodemon": "^3.0.1",
+    "ts-jest": "^29.4.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
   },
   "engines": {
     "node": ">=16.0.0"
@@ -22,8 +60,11 @@
   "keywords": [
     "telegram",
     "bot",
-    "zoracle",
+    "base",
     "cryptocurrency",
-    "notifications"
-  ]
-} 
+    "zora",
+    "nft",
+    "monitoring"
+  ],
+  "type": "module"
+}
