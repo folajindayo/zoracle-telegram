@@ -15,10 +15,16 @@ A Telegram bot for trading Zora content coins on Base blockchain with advanced f
 - **Copy-Trading**: Mirror trades from target wallets with sandbox mode
 
 ### Security Features
-- **Encrypted Private Keys**: All private keys are encrypted with AES-256-CBC
+- **CDP Server Wallets**: Secure wallets managed by Coinbase Developer Platform
 - **PIN Protection**: PIN required for sensitive operations
 - **MEV Protection**: Transaction splitting and random delays for large orders
-- **Persistent Database**: SQLite database for secure data storage
+- **Persistent Database**: MongoDB for secure data storage
+
+### Technical Features
+- **TypeScript**: Fully typed codebase for better developer experience
+- **Modular Architecture**: Well-organized code structure for maintainability
+- **Comprehensive Error Handling**: Robust error handling for API calls and database operations
+- **Automated Testing**: Jest for unit and integration tests
 
 ## Installation
 
@@ -43,6 +49,11 @@ npm install
 # API Keys
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 ALCHEMY_API_KEY=your_alchemy_api_key_here
+
+# Coinbase Developer Platform (CDP) Server Wallet API
+CDP_API_KEY=your_cdp_api_key_here
+CDP_API_SECRET=your_cdp_api_secret_here
+CDP_NETWORK=base
 
 # Base Network RPC URLs
 BASE_MAINNET_RPC=https://base-mainnet.g.alchemy.com/v2/your_alchemy_api_key_here
@@ -71,6 +82,11 @@ npm start
 ### Development Mode
 ```bash
 npm run dev
+```
+
+### TypeScript Build
+```bash
+npm run build
 ```
 
 ### Stopping the Bot
@@ -121,6 +137,7 @@ The bot is built with a modular architecture:
     - `handlers/` - Command handlers for different features
 
   - `services/` - Core services
+    - `cdpWallet.js` - Coinbase Developer Platform Server Wallet integration
     - `trading.js` - Real DEX integration with Aerodrome
     - `mempoolMonitor.js` - Real-time blockchain monitoring
     - `copytrade.js` - Copy-trade implementation
@@ -134,12 +151,63 @@ The bot is built with a modular architecture:
 
   - `config/` - Centralized configuration
   - `utils/` - Utility functions
-  - `run.js` - Entry point with environment checks
-  - `index.js` - Bot startup and graceful shutdown
+  - `types/` - TypeScript type definitions
+  - `run.ts` - Entry point with environment checks
+  - `index.ts` - Bot startup and graceful shutdown
 
-- `run.js` - Root entry point
-- `database/` - SQLite database files
+- `dist/` - Compiled TypeScript output
 - `logs/` - Log files
+
+## Project Structure
+
+```
+zoracle-telegram-bot/
+├── src/
+│   ├── bot/
+│   │   ├── baseBot.ts         # Core bot functionality
+│   │   ├── bot.ts             # Main bot instance
+│   │   ├── lockManager.ts     # Process lock management
+│   │   ├── zoracleBot.ts      # Zora-specific functionality
+│   │   └── handlers/          # Command handlers
+│   │       ├── alertHandlers.ts
+│   │       ├── copytradeHandlers.ts
+│   │       ├── discoveryHandlers.ts
+│   │       ├── portfolioHandlers.ts
+│   │       ├── tradeHandlers.ts
+│   │       └── walletHandlers.ts
+│   ├── services/
+│   │   ├── alerts.ts          # Price alert service
+│   │   ├── cdpWallet.ts       # CDP Server Wallet integration
+│   │   ├── copytrade.ts       # Copy trading functionality
+│   │   ├── discovery.ts       # Token discovery service
+│   │   ├── mempoolMonitor.ts  # Mempool monitoring
+│   │   ├── monitoring.ts      # Price monitoring
+│   │   ├── portfolio.ts       # Portfolio tracking
+│   │   ├── trading.ts         # Trading functionality
+│   │   ├── wallet.ts          # Wallet management
+│   │   └── secure_wallets/    # Encrypted wallet storage
+│   ├── database/
+│   │   ├── config/            # Database configuration
+│   │   ├── migrations/        # Database migrations
+│   │   ├── seeders/           # Database seeders
+│   │   ├── init.ts            # Database initialization
+│   │   ├── models.ts          # Database models
+│   │   └── operations.ts      # Database operations
+│   ├── types/
+│   │   └── index.ts           # TypeScript type definitions
+│   ├── utils/
+│   │   └── common.ts          # Utility functions
+│   ├── config/
+│   │   └── index.ts           # Configuration
+│   ├── run.ts                 # Startup script
+│   └── index.ts               # Main entry point
+├── scripts/                   # Utility scripts
+├── dist/                      # Compiled TypeScript output
+├── .env                       # Environment variables
+├── tsconfig.json              # TypeScript configuration
+├── jest.config.js             # Jest configuration
+└── package.json               # Dependencies
+```
 
 ## Security Features
 
@@ -153,7 +221,58 @@ Large orders are automatically split into smaller transactions with random delay
 Sensitive operations like wallet creation, trading, and exporting private keys require PIN confirmation.
 
 ### Persistent Database
-User data, wallet information, and transaction history are stored in a SQLite database with proper encryption.
+User data, wallet information, and transaction history are stored in MongoDB with proper encryption.
+
+## CDP Server Wallets
+
+The bot uses Coinbase Developer Platform (CDP) Server Wallets for enhanced security. This provides several advantages:
+
+### Enhanced Security
+- No private keys stored on the bot server
+- Enterprise-grade security and compliance
+- Multi-party computation (MPC) for transaction signing
+- Secure key management by Coinbase infrastructure
+
+## CDP Server Wallet Integration
+
+The bot now supports integration with Coinbase Developer Platform (CDP) Server Wallets for secure wallet management.
+
+### Setting up CDP Integration
+
+1. Create a Coinbase Developer account at https://developer.coinbase.com/
+2. Create an API key and secret with the appropriate permissions
+
+3. Add the following to your `.env` file:
+   ```
+   CDP_API_URL=https://api.cloud.coinbase.com/api/v3/
+   CDP_API_KEY=your_cdp_api_key_here
+   CDP_API_SECRET=your_cdp_api_secret_here
+   CDP_NETWORK=base
+   NODE_ENV=production  # Set to 'production' to use real CDP API integration
+   ```
+
+4. For development, you can use simulation mode by setting `NODE_ENV=development` in your `.env` file.
+
+### Authentication
+
+The CDP API v3 uses API key and secret authentication. The bot automatically includes these in the request headers:
+
+```
+X-API-Key: your_cdp_api_key
+X-API-Secret: your_cdp_api_secret
+```
+
+### API Endpoints Used
+
+- `POST /api/v3/wallets` - Create a new wallet
+- `GET /api/v3/wallets/{id}` - Get wallet details
+- `GET /api/v3/wallets/{id}/transactions` - Get wallet transactions
+
+For more details, see the [CDP API Documentation](https://docs.cloud.coinbase.com/exchange/reference).
+
+### Limitations
+- Direct private key import is not supported with CDP Server Wallets
+- Users must create a new wallet through the bot interface
 
 ## Advanced Trading Features
 
