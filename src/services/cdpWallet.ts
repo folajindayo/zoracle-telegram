@@ -3,7 +3,7 @@ import axios from 'axios';
 import * as crypto from 'crypto';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import { CONFIG  } from '../config';
+import { CONFIG  } from '../config/index.js';
 
 // Directory to store wallet data
 const WALLETS_DIR = path.join(__dirname, 'secure_wallets');

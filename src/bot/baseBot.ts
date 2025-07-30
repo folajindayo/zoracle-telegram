@@ -6,9 +6,10 @@ import * as crypto from 'crypto';
 import { Wallet, Contract, constants  } from 'ethers';
 import { formatEther, parseEther, formatUnits  } from 'ethers/lib/utils';
 import { escapeMarkdown, escapeMarkdownPreserveFormat } from '../utils/telegramUtils';
+import { markdownToHtml } from '../utils/telegramUtils'; // Added for markdownToHtml
 
 // Import all modules
-import * as walletManager from '../services/wallet';
+import * as walletManager from '../services/cdpWallet';
 import * as trading from '../services/trading';
 import * as portfolio from '../services/portfolio';
 import * as discovery from '../services/discovery';
@@ -872,7 +873,22 @@ bot.onText(/^\/sandbox (on|off)$/, (msg, match) => {
 
 // Help
 bot.onText(/\/help/, (msg) => {
-  bot.sendMessage(msg.chat.id, escapeMarkdownPreserveFormat(helpMessage), { parse_mode: 'MarkdownV2' as const });
+  // Convert helpMessage from Markdown to HTML for safe sending
+  const htmlHelp = markdownToHtml(helpMessage);
+  bot.sendMessage(msg.chat.id, htmlHelp, { parse_mode: 'HTML' });
+});
+
+// Debug command to test wallet.ts initialization and see CDP console log
+bot.onText(/^\/wallettest$/, async (msg) => {
+  const chatId = msg.chat.id;
+  // Call a walletManager function to trigger initialization and CDP log
+  // We'll use a dummy userId and dummy password/pin (no wallet will be created)
+  try {
+    await walletManager.createWallet('test_user', 'test_password', '1234');
+    bot.sendMessage(chatId, '✅ /wallettest: wallet.ts was called. Check your server logs for the CDP console output.');
+  } catch (err) {
+    bot.sendMessage(chatId, '❌ /wallettest: Error calling wallet.ts. Check logs.');
+  }
 });
 
 // Error handling, polling, etc. (existing code)

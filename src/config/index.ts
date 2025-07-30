@@ -1,6 +1,6 @@
 // Configuration file for Zoracle Telegram Bot
 import * as path from 'path';
-import { Config } from '../types';
+import { Config } from '../types/index.js';
 
 // Environment validation
 const requiredEnvVars = [
