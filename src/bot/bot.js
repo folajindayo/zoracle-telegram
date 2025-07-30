@@ -1,40 +1,25 @@
-const TelegramBot = require('node-telegram-bot-api');
 const { CONFIG } = require('../config');
-const { users, token } = require('./baseBot');
+const { bot, users } = require('./baseBot');
 
-// Initialize bot with polling
-let bot;
-try {
-  bot = new TelegramBot(token, { 
-    polling: true,
-    filepath: false // Disable file downloading to avoid disk space issues
-  });
-  
-  // Add isPolling method to check if bot is polling
+// Add isPolling method to check if bot is polling if not already added
+if (!bot.isPolling) {
   bot.isPolling = function() {
     return this.polling;
   };
-  
-  // Add specific error handlers
-  bot.on('polling_error', (error) => {
-    if (error.code === 'ETELEGRAM' && error.message.includes('409 Conflict')) {
-      console.error('❌ Multiple bot instances detected!');
-      console.error('Make sure only one instance of the bot is running.');
-      console.error('Try running: pkill -f "node index.js" before starting again.');
-      process.exit(1);
-    } else if (error.code === 'ETELEGRAM' && error.message.includes('401 Unauthorized')) {
-      console.error('❌ Invalid Telegram bot token!');
-      console.error('Please check your TELEGRAM_BOT_TOKEN in the .env file.');
-      console.error('You can get a valid token from @BotFather on Telegram.');
-      process.exit(1);
-    } else {
-      console.error('Polling error:', error.code, error.message);
-    }
-  });
-} catch (error) {
-  console.error('❌ Failed to initialize Telegram bot:', error.message);
-  process.exit(1);
 }
+
+// Add specific error handlers if not already added
+bot.on('polling_error', (error) => {
+  if (error.code === 'ETELEGRAM' && error.message.includes('409 Conflict')) {
+    console.error('❌ Multiple bot instances detected!');
+    console.error('Make sure only one instance of the bot is running.');
+    console.error('Try running: npm run kill-bot before starting again.');
+  } else if (error.code === 'ETELEGRAM' && error.message.includes('401 Unauthorized')) {
+    console.error('❌ Invalid Telegram bot token!');
+    console.error('Please check your TELEGRAM_BOT_TOKEN in the .env file.');
+    console.error('You can get a valid token from @BotFather on Telegram.');
+  }
+});
 
 // Logging Middleware
 bot.on('message', (msg) => {

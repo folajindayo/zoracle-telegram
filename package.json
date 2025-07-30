@@ -4,10 +4,10 @@
   "description": "Telegram bot for Base blockchain token monitoring with Zora content focus",
   "main": "src/index.js",
   "scripts": {
-    "start": "node run.js",
-    "dev": "nodemon run.js",
-    "debug": "NODE_DEBUG=telegram-bot-api node run.js",
-    "kill-bot": "pkill -f 'node run.js' || echo 'No bot instances running'",
+    "start": "node src/run.js",
+    "dev": "nodemon src/run.js",
+    "debug": "NODE_DEBUG=telegram-bot-api node src/run.js",
+    "kill-bot": "pkill -f 'node.*run.js' || echo 'No bot instances running' && curl -s \"https://api.telegram.org/bot$(grep TELEGRAM_BOT_TOKEN .env | cut -d= -f2)/deleteWebhook?drop_pending_updates=true\" > /dev/null",
     "generate-key": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
     "db:init": "node src/database/init.js",
     "db:seed": "node scripts/seed-db.js",
@@ -16,23 +16,23 @@
     "lint:fix": "eslint src/ --fix"
   },
   "dependencies": {
+    "@velora-dex/sdk": "^8.1.0",
     "axios": "^1.6.2",
+    "crypto": "^1.0.1",
     "dotenv": "^16.3.1",
     "dotenv-expand": "^10.0.0",
     "ethers": "^5.7.2",
-    "node-telegram-bot-api": "^0.63.0",
-    "speakeasy": "^2.0.0",
-    "qrcode": "^1.5.3",
-    "@velora-dex/sdk": "^8.1.0",
+    "fs-extra": "^11.2.0",
     "moment": "^2.29.4",
-    "crypto": "^1.0.1",
     "mongoose": "^8.0.3",
-    "uuid": "^9.0.1",
-    "fs-extra": "^11.2.0"
+    "node-telegram-bot-api": "^0.63.0",
+    "qrcode": "^1.5.3",
+    "speakeasy": "^2.0.0",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1",
-    "eslint": "^8.55.0"
+    "eslint": "^8.55.0",
+    "nodemon": "^3.0.1"
   },
   "engines": {
     "node": ">=16.0.0"

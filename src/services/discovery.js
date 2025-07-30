@@ -48,22 +48,43 @@ query TrendingCoins {
 async function getNewCoins() {
   try {
     const last24Hours = Math.floor(Date.now() / 1000) - 86400; // 24 hours ago
+    
+    // Add timeout and retry options
     const response = await axios.post(ZORA_API, {
       query: NEW_COINS_QUERY,
       variables: { last24Hours }
+    }, {
+      timeout: 5000, // 5 second timeout
+      validateStatus: status => status < 500 // Only treat 5xx as errors
     });
 
-    return response.data.data.tokens.map(token => ({
-      address: token.address,
-      name: token.name,
-      symbol: token.symbol,
-      title: token.metadata.title,
-      creator: token.metadata.creator,
-      mintedAt: token.mintedAt
-    }));
+    // Check if we have a valid response with data
+    if (response.data && response.data.data && response.data.data.tokens) {
+      return response.data.data.tokens.map(token => ({
+        address: token.address,
+        name: token.name || 'Unknown',
+        symbol: token.symbol || 'UNKNOWN',
+        title: token.metadata?.title || 'Untitled',
+        creator: token.metadata?.creator || 'Unknown Creator',
+        mintedAt: token.mintedAt
+      }));
+    } else {
+      console.warn('Invalid response format from Zora API');
+      return [];
+    }
   } catch (error) {
-    console.error('Error fetching new coins:', error);
-    return [];
+    console.error('Error fetching new coins:', error.message);
+    // Return mock data when API is down
+    return [
+      {
+        address: '0x1234567890123456789012345678901234567890',
+        name: 'API Unavailable - Sample Coin',
+        symbol: 'SAMPLE',
+        title: 'API Currently Unavailable',
+        creator: 'System',
+        mintedAt: Math.floor(Date.now() / 1000)
+      }
+    ];
   }
 }
 
@@ -75,20 +96,40 @@ async function getTrendingCoins() {
   try {
     const response = await axios.post(ZORA_API, {
       query: TRENDING_QUERY
+    }, {
+      timeout: 5000, // 5 second timeout
+      validateStatus: status => status < 500 // Only treat 5xx as errors
     });
 
-    return response.data.data.tokens.map(token => ({
-      address: token.address,
-      name: token.name,
-      symbol: token.symbol,
-      title: token.metadata.title,
-      creator: token.metadata.creator,
-      volume: token.volume,
-      holders: token.holderCount
-    }));
+    // Check if we have a valid response with data
+    if (response.data && response.data.data && response.data.data.tokens) {
+      return response.data.data.tokens.map(token => ({
+        address: token.address,
+        name: token.name || 'Unknown',
+        symbol: token.symbol || 'UNKNOWN',
+        title: token.metadata?.title || 'Untitled',
+        creator: token.metadata?.creator || 'Unknown Creator',
+        volume: token.volume || 0,
+        holders: token.holderCount || 0
+      }));
+    } else {
+      console.warn('Invalid response format from Zora API');
+      return [];
+    }
   } catch (error) {
-    console.error('Error fetching trending coins:', error);
-    return [];
+    console.error('Error fetching trending coins:', error.message);
+    // Return mock data when API is down
+    return [
+      {
+        address: '0x2345678901234567890123456789012345678901',
+        name: 'API Unavailable - Trending Sample',
+        symbol: 'TREND',
+        title: 'API Currently Unavailable',
+        creator: 'System',
+        volume: 1000,
+        holders: 250
+      }
+    ];
   }
 }
 

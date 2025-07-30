@@ -1,7 +1,7 @@
 /**
  * Wallet Handlers for Zoracle Telegram Bot
  */
-const { createWallet, importWallet, getEthBalance, getTokenBalance, encryptData, decryptData } = require('../baseBot');
+const walletManager = require('../../services/wallet');
 const { CONFIG } = require('../../config');
 
 // Conversation states
@@ -27,7 +27,8 @@ module.exports = (bot, users) => {
     if (user && user.wallet) {
       // User has a wallet, show wallet menu
       const walletAddress = user.wallet.address;
-      const ethBalance = await getEthBalance(walletAddress);
+      const balanceResult = await walletManager.getWalletBalances(userId);
+      const ethBalance = balanceResult.success ? balanceResult.balances.ETH : '0';
       
       const message = `
 🔐 *Your Wallet*
@@ -72,13 +73,15 @@ What would you like to do?
     const userId = callbackQuery.from.id.toString();
     
     if (action === 'wallet_create') {
-      // Create a new wallet
-      const wallet = createWallet();
+      // Prompt for password first
+      bot.sendMessage(chatId, '🔐 *Create a New Wallet*\n\nPlease enter a strong password for your wallet:', {
+        parse_mode: 'Markdown',
+        reply_markup: { force_reply: true }
+      });
       
-      // Store temporarily and ask for PIN
-      tempPins.set(userId, { wallet, step: WALLET_STATES.CREATE_PIN });
+      // Set state for password input
+      tempPins.set(userId, { step: WALLET_STATES.CREATE_PIN });
       
-      bot.sendMessage(chatId, 'Please create a PIN to secure your wallet (6 digits):');
       bot.answerCallbackQuery(callbackQuery.id);
     } else if (action === 'wallet_import') {
       // Ask for private key
@@ -97,7 +100,8 @@ What would you like to do?
       }
       
       const walletAddress = user.wallet.address;
-      const ethBalance = await getEthBalance(walletAddress);
+      const balanceResult = await walletManager.getWalletBalances(userId);
+      const ethBalance = balanceResult.success ? balanceResult.balances.ETH : '0';
       
       bot.sendMessage(chatId, `💰 *Wallet Balance*\nETH: ${ethBalance}`, { parse_mode: 'Markdown' });
       bot.answerCallbackQuery(callbackQuery.id);
@@ -127,65 +131,69 @@ What would you like to do?
     if (!userState) return;
     
     if (userState.step === WALLET_STATES.IMPORT_PRIVATE_KEY) {
-      // Try to import the wallet
-      try {
-        const wallet = importWallet(text);
-        
-        // Store temporarily and ask for PIN
-        tempPins.set(userId, { wallet, step: WALLET_STATES.CREATE_PIN });
-        
-        bot.sendMessage(chatId, 'Please create a PIN to secure your wallet (6 digits):');
-      } catch (error) {
-        bot.sendMessage(chatId, `❌ Error importing wallet: ${error.message}`);
-        tempPins.delete(userId);
-      }
-    } else if (userState.step === WALLET_STATES.CREATE_PIN) {
-      // Validate PIN format (6 digits)
-      if (!/^\d{6}$/.test(text)) {
-        bot.sendMessage(chatId, '❌ PIN must be 6 digits. Please try again:');
-        return;
-      }
+      // Store private key and ask for password
+      tempPins.set(userId, { privateKey: text, step: WALLET_STATES.CREATE_PIN });
       
-      // Store PIN and ask for confirmation
-      tempPins.set(userId, { ...userState, pin: text, step: WALLET_STATES.CONFIRM_PIN });
-      bot.sendMessage(chatId, 'Please confirm your PIN:');
-    } else if (userState.step === WALLET_STATES.CONFIRM_PIN) {
-      // Check if PINs match
-      if (text !== userState.pin) {
-        bot.sendMessage(chatId, '❌ PINs do not match. Please start over with /wallet');
-        tempPins.delete(userId);
-        return;
-      }
+      // Delete the message containing the private key for security
+      bot.deleteMessage(chatId, msg.message_id).catch(e => console.log('Could not delete message with private key'));
       
-      // Encrypt private key with PIN
-      const encryptedKey = encryptData(userState.wallet.privateKey);
-      
-      // Store wallet in users map
-      users.set(userId, {
-        wallet: {
-          address: userState.wallet.address,
-          encryptedKey
-        },
-        pin: userState.pin
+      bot.sendMessage(chatId, '🔐 *Import Wallet*\n\nPlease enter a password to encrypt your wallet:', {
+        parse_mode: 'Markdown',
+        reply_markup: { force_reply: true }
       });
+    
+    } else if (userState.step === WALLET_STATES.CREATE_PIN) {
+      // Store password and ask for PIN
+      tempPins.set(userId, { ...userState, password: text, step: WALLET_STATES.CONFIRM_PIN });
       
-      bot.sendMessage(chatId, `✅ Wallet setup complete!\n\nAddress: \`${userState.wallet.address}\`\n\nMake sure to keep your PIN safe. You'll need it for transactions.`, { parse_mode: 'Markdown' });
+      // Delete the message containing the password for security
+      bot.deleteMessage(chatId, msg.message_id).catch(e => console.log('Could not delete message with password'));
+      
+      bot.sendMessage(chatId, '🔢 *Create PIN*\n\nEnter a 4-6 digit PIN for quick access:', {
+        parse_mode: 'Markdown',
+        reply_markup: { force_reply: true }
+      });
+    } else if (userState.step === WALLET_STATES.CONFIRM_PIN) {
+      // Validate PIN format (4-6 digits)
+      if (!/^\d{4,6}$/.test(text)) {
+        bot.sendMessage(chatId, '❌ PIN must be 4-6 digits. Please try again:', {
+          reply_markup: { force_reply: true }
+        });
+        return;
+      }
+      
+      // Store PIN
+      tempPins.set(userId, { ...userState, pin: text });
+      
+      // Create or import wallet using wallet manager
+      let result;
+      if (userState.privateKey) {
+        // Import wallet
+        result = await walletManager.importWallet(userId, userState.privateKey, userState.password, text);
+      } else {
+        // Create new wallet
+        result = await walletManager.createWallet(userId, userState.password, text);
+      }
+      
+      if (result.success) {
+        bot.sendMessage(chatId, `✅ Wallet setup complete!\n\nAddress: \`${result.address}\`\n\nMake sure to keep your PIN and password safe. You'll need them for transactions.`, { parse_mode: 'Markdown' });
+        
+        // Show mnemonic if created new wallet
+        if (result.mnemonic) {
+          bot.sendMessage(chatId, '🔐 *IMPORTANT: Save Your Recovery Phrase*\n\n`' + result.mnemonic + '`\n\n⚠️ *NEVER share this with anyone!* Write it down and keep it in a safe place.', {
+            parse_mode: 'Markdown'
+          });
+        }
+      } else {
+        bot.sendMessage(chatId, `❌ Error setting up wallet: ${result.message}`);
+      }
+      
       tempPins.delete(userId);
     } else if (userState.step === 'export_key') {
-      // Verify PIN
-      const user = users.get(userId);
+      // We need to implement a secure way to export private keys
+      // For security reasons, we should require password verification
       
-      if (!user || text !== user.pin) {
-        bot.sendMessage(chatId, '❌ Incorrect PIN. Please try again with /wallet');
-        tempPins.delete(userId);
-        return;
-      }
-      
-      // Decrypt private key
-      const privateKey = decryptData(user.wallet.encryptedKey);
-      
-      // Send private key as a private message
-      bot.sendMessage(chatId, `🔑 *Your Private Key*\n\n\`${privateKey}\`\n\n⚠️ *NEVER share this with anyone!*`, { parse_mode: 'Markdown' });
+      bot.sendMessage(chatId, '⚠️ For security reasons, private key export is only available through a secure channel. Please use the wallet manager directly.');
       tempPins.delete(userId);
     }
   });
@@ -204,7 +212,8 @@ What would you like to do?
     }
     
     const walletAddress = user.wallet.address;
-    const ethBalance = await getEthBalance(walletAddress);
+    const balanceResult = await walletManager.getWalletBalances(userId);
+    const ethBalance = balanceResult.success ? balanceResult.balances.ETH : '0';
     
     bot.sendMessage(chatId, `💰 *Wallet Balance*\nETH: ${ethBalance}`, { parse_mode: 'Markdown' });
   });

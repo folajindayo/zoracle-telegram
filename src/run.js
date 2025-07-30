@@ -3,7 +3,10 @@
  * 
  * This script checks for required environment variables and initializes the bot.
  */
-require('dotenv').config();
+const dotenv = require('dotenv');
+const dotenvExpand = require('dotenv-expand');
+const env = dotenv.config();
+dotenvExpand.expand(env);
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');

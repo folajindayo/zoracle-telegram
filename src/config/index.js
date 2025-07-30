@@ -1,5 +1,4 @@
 // Configuration file for Zoracle Telegram Bot
-require('dotenv').config();
 const path = require('path');
 
 // Environment validation
