@@ -8,16 +8,19 @@ const { Wallet, Contract, constants } = require('ethers');
 const { formatEther, parseEther, formatUnits } = require('ethers/lib/utils');
 
 // Import all modules
-const walletManager = require('./wallet');
-const trading = require('./trading');
-const portfolio = require('./portfolio');
-const discovery = require('./discovery');
-const alerts = require('./alerts');
-const copytrade = require('./copytrade');
+const walletManager = require('../services/wallet');
+const trading = require('../services/trading');
+const portfolio = require('../services/portfolio');
+const discovery = require('../services/discovery');
+const alerts = require('../services/alerts');
+const copytrade = require('../services/copytrade');
 
 // Environment variables
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const ALCHEMY_API_KEY = process.env.ALCHEMY_API_KEY;
+
+// Debug log for token
+console.log('📝 Telegram Bot Token:', token ? `${token.substring(0, 10)}...` : 'undefined');
 
 // Validate required environment variables
 if (!token || !ALCHEMY_API_KEY) {
@@ -25,11 +28,38 @@ if (!token || !ALCHEMY_API_KEY) {
   process.exit(1);
 }
 
-// Create bot instance
-const bot = new TelegramBot(token, { polling: true });
+// Create bot instance with better error handling
+let bot;
+try {
+  // Create the bot with additional options
+  bot = new TelegramBot(token, {
+    polling: {
+      interval: 300,
+      autoStart: true,
+      params: {
+        timeout: 10
+      }
+    },
+    request: {
+      timeout: 30000
+    }
+  });
+  
+  // Add error handler
+  bot.on('polling_error', (error) => {
+    console.error('🔴 Telegram Bot polling error:', error.message);
+    // Don't crash on polling errors
+  });
+  
+  console.log('✅ Telegram Bot initialized successfully');
+} catch (error) {
+  console.error('❌ Failed to initialize Telegram Bot:', error.message);
+  process.exit(1);
+}
 
 // Provider setup
-const provider = new ethers.providers.AlchemyProvider('base', ALCHEMY_API_KEY);
+// Use mainnet as the network name for Base (Alchemy supports this)
+const provider = new ethers.providers.JsonRpcProvider(process.env.BASE_MAINNET_RPC || `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`);
 
 // Store user data and conversation states
 const users = new Map();
@@ -138,14 +168,14 @@ bot.on('message', (msg) => {
       break;
 
     case STATES.WALLET_SETUP:
-      const password = msg.text.trim();
+      var password = msg.text.trim();
       bot.sendMessage(chatId, 'Enter a 4-6 digit PIN for quick access:');
       userData.tempPassword = password;
       conversationStates.set(chatId, STATES.PIN_SETUP);
       break;
 
     case STATES.PIN_SETUP:
-      const pin = msg.text.trim();
+      var pin = msg.text.trim();
       if (userData.tempPK) {
         walletManager.importWallet(chatId.toString(), userData.tempPK, userData.tempPassword, pin);
       } else {

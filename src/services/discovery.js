@@ -1,6 +1,7 @@
-// Content-Coin Discovery Module
+// Discovery service for Zoracle Bot
+const { ethers } = require('ethers');
 const axios = require('axios');
-const { CONFIG } = require('./config');
+const { CONFIG } = require('../config');
 
 // Zora API endpoints
 const ZORA_API = 'https://api.zora.co/graphql';

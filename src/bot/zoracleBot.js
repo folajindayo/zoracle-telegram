@@ -63,16 +63,16 @@ bot.onText(/^\/start\s+(.+)$/, (msg, match) => {
   
   // Validate wallet address format (basic check)
   if (!walletAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
-    bot.sendMessage(chatId, "⚠️ Invalid wallet address format. Please use a valid Ethereum address starting with 0x followed by 40 hexadecimal characters.");
+    bot.sendMessage(chatId, '⚠️ Invalid wallet address format. Please use a valid Ethereum address starting with 0x followed by 40 hexadecimal characters.');
     return;
   }
   
   // Store user data
   users.set(chatId.toString(), {
     walletAddress,
-    username: msg.from.username || "Unknown",
-    firstName: msg.from.first_name || "",
-    lastName: msg.from.last_name || "",
+    username: msg.from.username || 'Unknown',
+    firstName: msg.from.first_name || '',
+    lastName: msg.from.last_name || '',
     followedCreators: [],
     lastActive: new Date().toISOString()
   });
@@ -107,7 +107,7 @@ bot.onText(/\/status/, (msg) => {
   const userData = users.get(chatId.toString());
   
   if (!userData) {
-    bot.sendMessage(chatId, "❌ You are not connected yet. Please use `/start your_wallet_address` to connect.", { parse_mode: 'Markdown' });
+    bot.sendMessage(chatId, '❌ You are not connected yet. Please use `/start your_wallet_address` to connect.', { parse_mode: 'Markdown' });
     return;
   }
   
@@ -142,7 +142,7 @@ bot.on('message', (msg) => {
   // Check if user is registered
   const userData = users.get(chatId.toString());
   if (userData) {
-    bot.sendMessage(chatId, "I only respond to commands. Try /help for a list of available commands.");
+    bot.sendMessage(chatId, 'I only respond to commands. Try /help for a list of available commands.');
   } else {
     bot.sendMessage(chatId, welcomeMessage + `\`${chatId}\``, { parse_mode: 'Markdown' });
   }

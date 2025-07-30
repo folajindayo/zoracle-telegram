@@ -1,6 +1,6 @@
 // Real-time monitoring service
 const { ethers } = require('ethers');
-const { CONFIG, ABIS } = require('./config');
+const { CONFIG, ABIS } = require('../config');
 const axios = require('axios');
 const WebSocket = require('ws');
 

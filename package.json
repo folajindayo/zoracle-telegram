@@ -1,26 +1,38 @@
 {
-  "name": "base-chain-monitor-bot",
+  "name": "zoracle-telegram-bot",
   "version": "1.0.0",
   "description": "Telegram bot for Base blockchain token monitoring with Zora content focus",
-  "main": "index.js",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node index.js",
-    "monitor": "node baseMonitor.js",
-    "dev": "nodemon index.js",
-    "debug": "NODE_DEBUG=telegram-bot-api node index.js"
+    "start": "node run.js",
+    "dev": "nodemon run.js",
+    "debug": "NODE_DEBUG=telegram-bot-api node run.js",
+    "kill-bot": "pkill -f 'node run.js' || echo 'No bot instances running'",
+    "generate-key": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+    "db:init": "node src/database/init.js",
+    "db:seed": "node scripts/seed-db.js",
+    "db:test": "node scripts/test-mongodb.js",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix"
   },
   "dependencies": {
     "axios": "^1.6.2",
     "dotenv": "^16.3.1",
+    "dotenv-expand": "^10.0.0",
     "ethers": "^5.7.2",
     "node-telegram-bot-api": "^0.63.0",
     "speakeasy": "^2.0.0",
     "qrcode": "^1.5.3",
-    "paraswap-sdk": "^6.4.2",
-    "moment": "^2.29.4"
+    "@velora-dex/sdk": "^8.1.0",
+    "moment": "^2.29.4",
+    "crypto": "^1.0.1",
+    "mongoose": "^8.0.3",
+    "uuid": "^9.0.1",
+    "fs-extra": "^11.2.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.0.1",
+    "eslint": "^8.55.0"
   },
   "engines": {
     "node": ">=16.0.0"
@@ -35,4 +47,4 @@
     "nft",
     "monitoring"
   ]
-} 
+}

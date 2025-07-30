@@ -1,7 +1,9 @@
-// Portfolio Management Module
+// Portfolio tracking service for Zoracle Bot
 const { ethers } = require('ethers');
-const { CONFIG, ABIS } = require('./config');
+const moment = require('moment');
+const { CONFIG, ABIS } = require('../config');
 const walletManager = require('./wallet');
+const { TransactionOps, TokenOps } = require('../database/operations');
 
 // Provider setup
 const provider = new ethers.providers.JsonRpcProvider(CONFIG.PROVIDER_URL);

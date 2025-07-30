@@ -1,8 +1,10 @@
-// Copy-Trading & Watchlists Module
+// Copy-trading service for Zoracle Bot
 const { ethers } = require('ethers');
-const { CONFIG } = require('./config');
+const { CONFIG, ABIS } = require('../config');
+const { CopyTradeOps, UserOps, TransactionOps } = require('../database/operations');
 const trading = require('./trading');
 const walletManager = require('./wallet');
+const { EventEmitter } = require('events');
 
 // Provider setup (mainnet and testnet)
 const providers = {
@@ -15,8 +17,53 @@ const watchlists = new Map(); // userId => { name: string, tokens: string[], ale
 const mirrorConfigs = new Map(); // userId => { targetWallet: string, slippageGuard: number, active: boolean, sandbox: boolean }
 
 // Event emitter for copy trades (simplified; use Alchemy webhook in production)
-const eventEmitter = new require('events').EventEmitter();
-const tradeEvents = new eventEmitter();
+const tradeEvents = new EventEmitter();
+
+/**
+ * Initialize the copy trade service
+ * @returns {Promise<boolean>} - Success status
+ */
+async function initialize() {
+  try {
+    console.log('✅ Copy trade service initialized');
+    
+    // Load active copy-trade configurations from database
+    // Check if the function exists before calling it
+    let activeCopyTrades = [];
+    if (CopyTradeOps && typeof CopyTradeOps.getActiveCopyTrades === 'function') {
+      try {
+        activeCopyTrades = await CopyTradeOps.getActiveCopyTrades();
+      } catch (dbError) {
+        console.warn(`⚠️ Could not load copy trades from database: ${dbError.message}`);
+        // Continue with empty array
+      }
+    } else {
+      console.log('ℹ️ No database function available for loading copy trades');
+    }
+    
+    // Set up monitoring for each active configuration
+    if (activeCopyTrades && activeCopyTrades.length > 0) {
+      console.log(`📊 Setting up monitoring for ${activeCopyTrades.length} active copy-trade configurations`);
+      
+      for (const config of activeCopyTrades) {
+        mirrorConfigs.set(config.telegramId, {
+          targetWallet: config.targetWallet,
+          slippageGuard: config.slippage || 2,
+          active: true,
+          sandbox: config.sandboxMode || false
+        });
+        
+        // Start monitoring each target wallet
+        startMonitoring(config.telegramId, config.targetWallet, config.sandboxMode);
+      }
+    }
+    
+    return true;
+  } catch (error) {
+    console.error(`❌ Error initializing copy trade service: ${error.message}`);
+    return false;
+  }
+}
 
 /**
  * Create or update watchlist
@@ -99,7 +146,17 @@ function toggleSandbox(userId, enable) {
   }
 }
 
+/**
+ * Get the event emitter for copy trade events
+ * @returns {EventEmitter} - The event emitter
+ */
+function getEventEmitter() {
+  return tradeEvents;
+}
+
 module.exports = {
+  initialize,
+  getEventEmitter,
   createWatchlist,
   getWatchlists,
   configureMirror,

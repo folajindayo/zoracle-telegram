@@ -1,11 +1,12 @@
-// Base Zora Trading Bot - Wallet Management
+// Wallet management service for Zoracle Bot
 const { ethers } = require('ethers');
 const crypto = require('crypto');
-const fs = require('fs');
+const fs = require('fs-extra');
 const path = require('path');
-const { CONFIG, ABIS } = require('./config');
-const speakeasy = require('speakeasy'); // For 2FA TOTP
-const qrcode = require('qrcode'); // For 2FA QR code
+const { CONFIG, ABIS } = require('../config');
+const speakeasy = require('speakeasy');
+const QRCode = require('qrcode');
+const { UserOps } = require('../database/operations');
 
 // Directory to store encrypted wallets
 const WALLETS_DIR = path.join(__dirname, 'secure_wallets');
@@ -268,7 +269,7 @@ async function get2FAQRCode(userId) {
     // Generate QR code
     const otpauth_url = `otpauth://totp/Zoracle:${walletData.address.substring(0, 8)}?secret=${walletData.twoFactorSecret}&issuer=Zoracle`;
     
-    const qrCode = await qrcode.toDataURL(otpauth_url);
+    const qrCode = await QRCode.toDataURL(otpauth_url);
     
     return {
       success: true,

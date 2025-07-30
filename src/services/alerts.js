@@ -1,6 +1,6 @@
 // Alerts & Notifications Module
 const { ethers } = require('ethers');
-const { CONFIG } = require('./config');
+const { CONFIG } = require('../config');
 const walletManager = require('./wallet');
 const discovery = require('./discovery');
 
