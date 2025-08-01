@@ -90,6 +90,17 @@ async function processPendingTransaction(txHash): Promise<any> {
     const tx = await provider.getTransaction(txHash);
     if (!tx) return;
 
+    // Validate the transaction addresses before proceeding
+    if (tx.from && !isValidEthereumAddress(tx.from)) {
+      console.warn(`⚠️ Invalid 'from' address in transaction ${txHash}: ${tx.from}`);
+      return;
+    }
+
+    if (tx.to && !isValidEthereumAddress(tx.to)) {
+      console.warn(`⚠️ Invalid 'to' address in transaction ${txHash}: ${tx.to}`);
+      return;
+    }
+
     // Process DEX interactions
     if (isDEXInteraction(tx)) {
       processDEXTransaction(tx);
@@ -134,6 +145,17 @@ async function processNewBlock(blockNumber): Promise<any> {
       // Make sure tx and its properties exist before using them
       if (!tx) continue;
       
+      // Validate the transaction addresses before proceeding
+      if (tx.from && !isValidEthereumAddress(tx.from)) {
+        console.warn(`⚠️ Invalid 'from' address in block ${blockNumber}, tx ${tx.hash}: ${tx.from}`);
+        continue;
+      }
+
+      if (tx.to && !isValidEthereumAddress(tx.to)) {
+        console.warn(`⚠️ Invalid 'to' address in block ${blockNumber}, tx ${tx.hash}: ${tx.to}`);
+        continue;
+      }
+      
       // Process confirmed transactions here
       mempoolEvents.emit('confirmed', {
         hash: tx.hash || '',
@@ -155,7 +177,7 @@ async function processNewBlock(blockNumber): Promise<any> {
  * @returns {boolean} - True if interacting with a DEX
  */
 function isDEXInteraction(tx): any {
-  if (!tx || !tx.to) return false;
+  if (!tx || !tx.to || !isValidEthereumAddress(tx.to)) return false;
   
   // Check if transaction is to a known DEX router
   const dexRouters = Object.values(CONFIG.DEX_ROUTERS).map(addr => (addr as string).toLowerCase());
@@ -256,7 +278,7 @@ function processERC20Transaction(tx): any {
  * @returns {boolean} - True if interacting with Zora
  */
 function isZoraInteraction(tx): any {
-  if (!tx || !tx.to) return false;
+  if (!tx || !tx.to || !isValidEthereumAddress(tx.to)) return false;
   
   // Check if transaction is to a known Zora contract
   const zoraContracts = Object.values(CONFIG.ZORA_CONTRACTS).map(addr => (addr as string).toLowerCase());
@@ -354,9 +376,25 @@ function updatePackageJSON(): any {
   // This is just a placeholder for development
 }
 
+/**
+ * Safely validates an Ethereum address without throwing exceptions
+ * @param {string} address - Address to validate
+ * @returns {boolean} - True if address is valid
+ */
+function isValidEthereumAddress(address): boolean {
+  try {
+    // Check address format and checksum
+    const checksumAddress = ethers.utils.getAddress(address);
+    return true;
+  } catch (error) {
+    // If ethers.utils.getAddress throws, the address is invalid
+    return false;
+  }
+}
+
 export { 
   startMonitoring,
   stopMonitoring,
   isActive,
   mempoolEvents
- }; 
+}; 
