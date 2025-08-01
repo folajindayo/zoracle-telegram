@@ -157,9 +157,10 @@ export interface Config {
   PROVIDER_URL: string;
   TESTNET_PROVIDER_URL: string;
   CDP_NETWORK: string;
-  CDP_API_URL: string;
+  ZORACLE_API_URL: string;
   CDP_API_KEY: string;
   CDP_API_SECRET: string;
+  CDP_WALLET_SECRET: string;
   CDP_SIMULATION_MODE: boolean;
   FEE_PERCENTAGE: number;
   FEE_RECIPIENT: string;

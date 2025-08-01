@@ -11,21 +11,152 @@ const mempoolEvents = new EventEmitter();
 // Provider setup
 let provider;
 let isMonitoring = false;
+let failoverAttempts = 0;
 
-// Initialize provider
+// Alternative RPC URLs for failover
+const FALLBACK_PROVIDERS = [
+  'https://mainnet.base.org',
+  'https://base.llamarpc.com', 
+  'https://base.rpc.blxrbdn.com',
+  'https://1rpc.io/base' // Additional fallback
+];
+
+// Rate limiting for Ankr API
+const API_CALLS = {
+  count: 0,
+  lastReset: Date.now(),
+  window: 60000, // 1 minute window
+  limit: 250 // Ankr free tier typically allows ~250-300 requests per minute
+};
+
+// Initialize provider with rate limiting and fallback options
 function initProvider(): any {
   try {
-    provider = new ethers.providers.JsonRpcProvider(CONFIG.PROVIDER_URL);
-    console.log('✅ Mempool monitor provider initialized');
+    // Check if we need to reset our rate limit counter
+    const now = Date.now();
+    if (now - API_CALLS.lastReset > API_CALLS.window) {
+      API_CALLS.count = 0;
+      API_CALLS.lastReset = now;
+    }
+
+    // If we've had multiple failures, try a failover provider
+    let providerUrl = CONFIG.PROVIDER_URL;
+    let isAnkrProvider = true;
+    
+    if (failoverAttempts > 0 && failoverAttempts <= FALLBACK_PROVIDERS.length) {
+      const fallbackIndex = (failoverAttempts - 1) % FALLBACK_PROVIDERS.length;
+      providerUrl = FALLBACK_PROVIDERS[fallbackIndex];
+      console.log(`🔄 Using failover provider (${failoverAttempts}): ${providerUrl}`);
+      isAnkrProvider = false; // Mark as non-Ankr provider
+    }
+    
+    // Create provider without custom options (ethers v5 doesn't support options as 3rd param)
+    provider = new ethers.providers.JsonRpcProvider(providerUrl);
+    
+    // Set up rate limiting logic for Ankr
+    if (isAnkrProvider) {
+      console.log('⚙️ Setting up rate limiting for Ankr provider');
+      
+      // Create a wrapper for the send method to implement rate limiting
+      const originalSend = provider.send.bind(provider);
+      provider.send = async function(method, params) {
+        // Check if we're near the rate limit
+        if (API_CALLS.count >= API_CALLS.limit) {
+          const waitTime = API_CALLS.window - (Date.now() - API_CALLS.lastReset) + 100;
+          if (waitTime > 0) {
+            console.log(`⚠️ Rate limit reached, waiting ${waitTime}ms before next request`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            // Reset counter after waiting
+            API_CALLS.count = 0;
+            API_CALLS.lastReset = Date.now();
+          }
+        }
+        
+        // Increment the counter for each API call
+        API_CALLS.count++;
+        
+        // Call the original send method
+        return originalSend(method, params);
+      };
+    }
+    
+    // Add global error handler for provider
+    provider.on('error', (error) => {
+      console.error('❌ Mempool monitor provider error:', error);
+      
+      // Check for rate limiting errors specifically
+      if (error.message && (
+        error.message.includes('429') || 
+        error.message.includes('too many requests') || 
+        error.message.includes('rate limit')
+      )) {
+        console.log('⚠️ Rate limit detected, waiting before retry');
+        setTimeout(() => {
+          console.log('🔄 Retrying after rate limit cooldown');
+          initProvider();
+        }, 60000); // Wait a full minute
+        return;
+      }
+      
+      // For other errors, increment failover attempts
+      failoverAttempts++;
+      
+      // Attempt to recover by reinitializing the provider after a delay
+      setTimeout(() => {
+        console.log('🔄 Attempting to reinitialize mempool monitor provider...');
+        initProvider();
+      }, 5000);
+    });
+    
+    // Test the provider with a basic call
+    provider.getBlockNumber().then(() => {
+      console.log('✅ Mempool monitor provider initialized and verified');
+      // Reset failover attempts on success
+      failoverAttempts = 0;
+      
+      // Log provider info
+      console.log(`📊 Using ${isAnkrProvider ? 'Ankr' : 'alternative'} RPC provider: ${
+        providerUrl.substring(0, providerUrl.indexOf('/base') + 5)}...`);
+    }).catch(error => {
+      console.error('❌ Provider verification failed:', error.message);
+      failoverAttempts++;
+      
+      // Try next provider
+      setTimeout(() => {
+        console.log('🔄 Provider verification failed. Trying next provider...');
+        initProvider();
+      }, 2000);
+    });
+    
     return true;
   } catch (error) {
     console.error('❌ Failed to initialize mempool monitor provider:', error);
+    
+    // Increment failover attempts
+    failoverAttempts++;
+    
+    if (failoverAttempts <= FALLBACK_PROVIDERS.length) {
+      // Try next provider after a short delay
+      setTimeout(() => {
+        console.log('🔄 Trying next provider...');
+        initProvider();
+      }, 2000);
+    }
+    
     return false;
   }
 }
 
 /**
+ * Optimized for Ankr: Pending tx hashes to be processed in batch
+ */
+let pendingTxQueue = [];
+let processingPending = false;
+let lastProcessedBlock = 0;
+
+/**
  * Start monitoring the mempool for transactions
+ * Optimized for Ankr's free tier with batching
  */
 function startMonitoring(): any {
   if (isMonitoring) {
@@ -38,21 +169,77 @@ function startMonitoring(): any {
     return false;
   }
 
-  console.log('🔍 Starting mempool monitoring...');
+  console.log('🔍 Starting mempool monitoring with Ankr optimization...');
   
-  // Listen for pending transactions
-  provider.on('pending', (txHash) => {
-    processPendingTransaction(txHash);
-  });
-
-  // Listen for new blocks
-  provider.on('block', (blockNumber) => {
-    processNewBlock(blockNumber);
-  });
+  // Start with polling instead of event subscription
+  // This is more reliable with Ankr's free tier
+  console.log('⚙️ Configuring block polling for Ankr compatibility');
+  
+  // Poll for new blocks instead of using events
+  // This is more efficient for Ankr's free tier
+  blockPollIntervalId = setInterval(async () => {
+    try {
+      const blockNumber = await provider.getBlockNumber();
+      if (blockNumber > lastProcessedBlock) {
+        console.log(`📦 New block detected: ${blockNumber}`);
+        lastProcessedBlock = blockNumber;
+        processNewBlock(blockNumber);
+      }
+    } catch (error) {
+      console.warn('⚠️ Block polling error:', error.message);
+    }
+  }, 10000); // Poll every 10 seconds
+  
+  // Use a limited pending transaction monitoring approach
+  // We'll only get a sample of pending transactions to stay within rate limits
+  let pendingMonitorActive = true;
+  
+  // Setup pending transaction monitoring with sampling
+  const pendingTxMonitor = async () => {
+    if (!pendingMonitorActive) return;
+    
+    try {
+      // Ask for pending transactions from mempool
+      // Note: This is not supported by all RPC providers including Ankr free tier
+      // So we're using a fallback approach that doesn't depend on pending tx events
+      const pendingTxs = await provider.send('eth_pendingTransactions', []);
+      
+      // Take a small sample to avoid rate limiting
+      if (Array.isArray(pendingTxs) && pendingTxs.length > 0) {
+        // Process up to 5 transactions per poll to stay within limits
+        const sampleSize = Math.min(5, pendingTxs.length);
+        for (let i = 0; i < sampleSize; i++) {
+          const txIndex = Math.floor(Math.random() * pendingTxs.length);
+          if (pendingTxs[txIndex] && pendingTxs[txIndex].hash) {
+            processPendingTransaction(pendingTxs[txIndex].hash);
+          }
+        }
+      }
+    } catch (error) {
+      // Most free RPCs don't support eth_pendingTransactions so this is expected to fail
+      // console.warn('Pending tx monitoring not supported by this provider:', error.message);
+      
+      // Switch to a block-only strategy after a few failed attempts
+      pendingMonitorActive = false;
+    }
+    
+    // Continue monitoring if active
+    if (pendingMonitorActive) {
+      setTimeout(pendingTxMonitor, 15000); // Poll every 15 seconds
+    } else {
+      console.log('ℹ️ Switched to block-only monitoring (pending tx monitoring not supported)');
+    }
+  };
+  
+  // Start pending transaction monitoring
+  pendingTxMonitor();
 
   isMonitoring = true;
   return true;
 }
+
+// Store intervals for cleanup
+let blockPollIntervalId = null;
 
 /**
  * Stop monitoring the mempool
@@ -65,11 +252,23 @@ function stopMonitoring(): any {
 
   console.log('🛑 Stopping mempool monitoring...');
   
-  // Remove all listeners
-  provider.removeAllListeners('pending');
-  provider.removeAllListeners('block');
+  // Clear polling intervals
+  if (blockPollIntervalId) {
+    clearInterval(blockPollIntervalId);
+    blockPollIntervalId = null;
+  }
+  
+  // Clear any pending operations
+  pendingTxQueue = [];
+  processingPending = false;
+  
+  // For safety, also remove any event listeners
+  if (provider) {
+    provider.removeAllListeners();
+  }
   
   isMonitoring = false;
+  console.log('✅ Mempool monitoring stopped');
   return true;
 }
 
@@ -86,9 +285,19 @@ function isActive(): any {
  */
 async function processPendingTransaction(txHash): Promise<any> {
   try {
-    // Get transaction details
-    const tx = await provider.getTransaction(txHash);
-    if (!tx) return;
+    // Get transaction details with retry mechanism
+    let tx;
+    try {
+      tx = await retryWithBackoff(async () => {
+        const result = await provider.getTransaction(txHash);
+        if (!result) throw new Error(`Transaction ${txHash} not found`);
+        return result;
+      }, 2, 500); // Fewer retries and shorter delay for pending tx
+    } catch (providerError) {
+      // This specifically handles provider errors like invalid address format
+      console.warn(`⚠️ Provider error for transaction ${txHash} after retries:`, providerError.message);
+      return;
+    }
 
     // Validate the transaction addresses before proceeding
     if (tx.from && !isValidEthereumAddress(tx.from)) {
@@ -134,11 +343,44 @@ async function processPendingTransaction(txHash): Promise<any> {
  * Process a new block
  * @param {number} blockNumber - Block number
  */
+/**
+ * Retry a function with exponential backoff
+ * @param {Function} fn - Function to retry
+ * @param {number} maxRetries - Maximum number of retries
+ * @param {number} baseDelay - Base delay in ms
+ * @returns {Promise<any>} - Result of the function
+ */
+async function retryWithBackoff(fn, maxRetries = 3, baseDelay = 1000): Promise<any> {
+  let lastError;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      const delay = baseDelay * Math.pow(2, attempt);
+      console.log(`Attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError;
+}
+
 async function processNewBlock(blockNumber): Promise<any> {
   try {
-    // Get block details
-    const block = await provider.getBlock(blockNumber, true);
-    if (!block) return;
+    // Get block details with retry mechanism
+    let block;
+    try {
+      block = await retryWithBackoff(async () => {
+        const result = await provider.getBlock(blockNumber, true);
+        if (!result) throw new Error(`Block ${blockNumber} not found`);
+        return result;
+      });
+    } catch (providerError) {
+      console.warn(`⚠️ Provider error for block ${blockNumber} after retries:`, providerError.message);
+      return;
+    }
 
     // Process transactions in the block
     for (const tx of block.transactions) {
@@ -156,15 +398,19 @@ async function processNewBlock(blockNumber): Promise<any> {
         continue;
       }
       
-      // Process confirmed transactions here
-      mempoolEvents.emit('confirmed', {
-        hash: tx.hash || '',
-        from: tx.from || '',
-        to: tx.to || '',
-        value: tx.value ? tx.value.toString() : '0',
-        blockNumber: block.number,
-        timestamp: block.timestamp
-      });
+      try {
+        // Process confirmed transactions here
+        mempoolEvents.emit('confirmed', {
+          hash: tx.hash || '',
+          from: tx.from || '',
+          to: tx.to || '',
+          value: tx.value ? tx.value.toString() : '0',
+          blockNumber: block.number,
+          timestamp: block.timestamp
+        });
+      } catch (txError) {
+        console.warn(`⚠️ Error emitting confirmed transaction in block ${blockNumber}, tx ${tx.hash}:`, txError.message);
+      }
     }
   } catch (error) {
     console.error(`❌ Error processing block ${blockNumber}:`, error);
@@ -383,7 +629,12 @@ function updatePackageJSON(): any {
  */
 function isValidEthereumAddress(address): boolean {
   try {
-    // Check address format and checksum
+    if (!address) return false;
+    if (typeof address !== 'string') return false;
+    if (!address.startsWith('0x')) return false;
+    if (address.length !== 42) return false;  // Ethereum addresses are 42 chars (0x + 40 hex chars)
+    
+    // Final validation using ethers utils
     const checksumAddress = ethers.utils.getAddress(address);
     return true;
   } catch (error) {

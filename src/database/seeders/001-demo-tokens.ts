@@ -3,7 +3,7 @@ import { QueryInterface } from 'sequelize';
 /**
  * Seeder for demo tokens
  */
-export = {
+export default {
   up: async (queryInterface: QueryInterface) => {
     await queryInterface.bulkInsert('Tokens', [
       {

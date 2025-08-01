@@ -3,7 +3,7 @@ import { QueryInterface, Sequelize } from 'sequelize';
 /**
  * Migration for creating initial database schema
  */
-export = {
+export default {
   up: async (queryInterface: QueryInterface, Sequelize: any) => {
     // Users table
     await queryInterface.createTable('Users', {

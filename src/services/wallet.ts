@@ -3,18 +3,18 @@ import { ethers } from "ethers";
 import * as crypto from "crypto";
 import * as fs from "fs-extra";
 import * as path from "path";
-import { CONFIG, ABIS } from "../config/index.js";
+import { CONFIG, ABIS } from "../config/index";
 import * as speakeasy from "speakeasy";
 import * as QRCode from "qrcode";
-import { UserOps } from "../database/operations.js";
+import { UserOps } from "../database/operations";
 import { CdpClient } from "@coinbase/cdp-sdk";
 import dotenv from "dotenv";
 
 dotenv.config();
 
 const cdp = new CdpClient({
-  apiKeyId: process.env.CDP_API_KEY_ID,
-  apiKeySecret: process.env.CDP_API_KEY_SECRET,
+  apiKeyId: process.env.CDP_API_KEY,
+  apiKeySecret: process.env.CDP_API_SECRET,
   walletSecret: process.env.CDP_WALLET_SECRET,
 });
 

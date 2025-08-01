@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useAlchemyCopyTradeMonitor, type CreatorActivity } from "@/hooks/useAlchemyCopyTradeMonitor";
+import { useAnkrCopyTradeMonitor, type CreatorActivity } from "@/hooks/useAnkrCopyTradeMonitor";
 import { toast } from "sonner";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import { usePrivy } from "@privy-io/react-auth";
@@ -96,7 +96,7 @@ export function CopyTradeListener() {
   };
 
   // Use the hook when component mounts if monitoring is enabled
-  useAlchemyCopyTradeMonitor({
+  useAnkrCopyTradeMonitor({
     creatorAddresses: isEnabled ? followedCreators : [],
     onActivityDetected: handleCreatorActivity,
     pollingInterval: 15000, // poll every 15 seconds

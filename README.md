@@ -46,24 +46,25 @@ npm install
 
 3. Create a `.env` file in the root directory:
 ```
-# API Keys
+# Required Variables
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-ALCHEMY_API_KEY=your_alchemy_api_key_here
 
-# Coinbase Developer Platform (CDP) Server Wallet API
+# Ankr RPC (Optional - defaults are provided in code)
+PROVIDER_URL=https://rpc.ankr.com/base/your_ankr_api_key_here
+TESTNET_PROVIDER_URL=https://rpc.ankr.com/base_sepolia/your_ankr_api_key_here
+
+# UseZoracle API (CDP Integration)
+ZORACLE_API_URL=https://usezoracle-telegrambot-production.up.railway.app
 CDP_API_KEY=your_cdp_api_key_here
 CDP_API_SECRET=your_cdp_api_secret_here
+CDP_WALLET_SECRET=your_wallet_secret_here
 CDP_NETWORK=base
-
-# Base Network RPC URLs
-BASE_MAINNET_RPC=https://base-mainnet.g.alchemy.com/v2/your_alchemy_api_key_here
-BASE_TESTNET_RPC=https://base-sepolia.g.alchemy.com/v2/your_alchemy_api_key_here
 
 # Security
 MASTER_KEY=generate_with_npm_run_generate-key
 
 # Network settings (mainnet or testnet)
-NETWORK=testnet
+NETWORK=mainnet
 ```
 
 4. Generate a secure MASTER_KEY:
@@ -233,46 +234,60 @@ The bot uses Coinbase Developer Platform (CDP) Server Wallets for enhanced secur
 - Multi-party computation (MPC) for transaction signing
 - Secure key management by Coinbase infrastructure
 
-## CDP Server Wallet Integration
+## UseZoracle API Integration
 
-The bot now supports integration with Coinbase Developer Platform (CDP) Server Wallets for secure wallet management.
+The bot uses the UseZoracle API for wallet management and cryptocurrency operations through the Coinbase Developer Platform (CDP).
 
-### Setting up CDP Integration
+### Setting up UseZoracle API Integration
 
-1. Create a Coinbase Developer account at https://developer.coinbase.com/
-2. Create an API key and secret with the appropriate permissions
-
-3. Add the following to your `.env` file:
-   ```
-   CDP_API_URL=https://api.cloud.coinbase.com/api/v3/
-   CDP_API_KEY=your_cdp_api_key_here
-   CDP_API_SECRET=your_cdp_api_secret_here
-   CDP_NETWORK=base
-   NODE_ENV=production  # Set to 'production' to use real CDP API integration
-   ```
-
-4. For development, you can use simulation mode by setting `NODE_ENV=development` in your `.env` file.
-
-### Authentication
-
-The CDP API v3 uses API key and secret authentication. The bot automatically includes these in the request headers:
+Add the following to your `.env` file:
 
 ```
-X-API-Key: your_cdp_api_key
-X-API-Secret: your_cdp_api_secret
+# UseZoracle API Configuration
+ZORACLE_API_URL=https://usezoracle-telegrambot-production.up.railway.app
+CDP_API_KEY=your_cdp_api_key_here
+CDP_API_SECRET=your_cdp_api_secret_here
+CDP_WALLET_SECRET=your_wallet_secret_here
 ```
 
-### API Endpoints Used
+### Key Features
 
-- `POST /api/v3/wallets` - Create a new wallet
-- `GET /api/v3/wallets/{id}` - Get wallet details
-- `GET /api/v3/wallets/{id}/transactions` - Get wallet transactions
-
-For more details, see the [CDP API Documentation](https://docs.cloud.coinbase.com/exchange/reference).
+- **Account Management**: Create accounts, check balances, and securely store account data
+- **Transaction Handling**: Transfer tokens between accounts with proper error handling
+- **Security**: PIN protection, session timeouts, and encrypted wallet data storage
 
 ### Limitations
-- Direct private key import is not supported with CDP Server Wallets
+- Direct private key import is not supported with the UseZoracle API
 - Users must create a new wallet through the bot interface
+
+## Ankr RPC Integration
+
+The bot uses Ankr's RPC endpoint for Base network to monitor blockchain activity. This replaces the previous Alchemy integration.
+
+### Configuration
+
+Add the following to your `.env` file to override the default endpoints:
+
+```
+# Optional - Override the default Ankr endpoints
+PROVIDER_URL=https://rpc.ankr.com/base/YOUR_API_KEY
+TESTNET_PROVIDER_URL=https://rpc.ankr.com/base_sepolia/YOUR_API_KEY
+```
+
+### Key Features
+
+- **Rate Limiting**: Smart handling of Ankr's free tier limitations (~250-300 requests per minute)
+- **Block Polling**: Efficient polling system for monitoring new blocks
+- **Fallback Providers**: Automatic switching to alternative providers if Ankr is unavailable
+- **Error Handling**: Exponential backoff and retry mechanisms for transient errors
+
+### Fallback Providers
+
+If the Ankr endpoint fails, the system automatically switches to one of these alternative providers:
+1. Official Base RPC (https://mainnet.base.org)
+2. LlamaRPC (https://base.llamarpc.com)
+3. Bloxroute (https://base.rpc.blxrbdn.com)
+4. 1RPC (https://1rpc.io/base)
 
 ## Advanced Trading Features
 

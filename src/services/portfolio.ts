@@ -1,9 +1,9 @@
 // Portfolio tracking service for Zoracle Bot
 import { ethers  } from 'ethers';
 import moment from 'moment';
-import { CONFIG, ABIS  } from '../config/index.js';
-import * as walletManager from './wallet.js';
-import { TransactionOps, TokenOps  } from '../database/operations.js';
+import { CONFIG, ABIS  } from '../config/index';
+import * as walletManager from './wallet';
+import { TransactionOps, TokenOps  } from '../database/operations';
 
 // Provider setup
 const provider = new ethers.providers.JsonRpcProvider(CONFIG.PROVIDER_URL);

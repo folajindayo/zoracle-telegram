@@ -1,16 +1,20 @@
 // Configuration file for Zoracle Telegram Bot
 import * as path from 'path';
-import { Config } from '../types/index.js';
+import { Config } from '../types/index';
 
 // Environment validation
 const requiredEnvVars = [
-  'TELEGRAM_BOT_TOKEN', 
-  'ALCHEMY_API_KEY'
+  'TELEGRAM_BOT_TOKEN' 
+  // No longer requiring ALCHEMY_API_KEY since we're using Ankr
 ];
 
-// CDP API keys are optional in development mode
+// For logging purposes, check which RPC provider is being used
+const isUsingAnkr = !process.env.PROVIDER_URL || 
+  process.env.PROVIDER_URL.includes('ankr.com');
+
+// UseZoracle API keys are optional in development mode
 if (process.env.NODE_ENV === 'production') {
-  requiredEnvVars.push('CDP_API_KEY', 'CDP_API_SECRET');
+  requiredEnvVars.push('CDP_API_KEY', 'CDP_API_SECRET', 'CDP_WALLET_SECRET');
 }
 
 for (const envVar of requiredEnvVars) {
@@ -19,6 +23,13 @@ for (const envVar of requiredEnvVars) {
     console.error('Please create a .env file with the required variables.');
     process.exit(1);
   }
+}
+
+// Log RPC provider information
+if (isUsingAnkr) {
+  console.log('🔌 Using Ankr RPC provider for blockchain interaction');
+} else {
+  console.log(`🔌 Using custom RPC provider: ${process.env.PROVIDER_URL || 'fallback'}`);
 }
 
 // Paths
@@ -33,15 +44,16 @@ const CONFIG: Config & Record<string, any> = {
   
   // Network configuration
   NETWORK: process.env.NETWORK || 'base',
-  PROVIDER_URL: process.env.PROVIDER_URL || `https://base-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
-  TESTNET_PROVIDER_URL: `https://base-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
+  PROVIDER_URL: process.env.PROVIDER_URL || 'https://rpc.ankr.com/base/b39a19f9ecf66252bf862fe6948021cd1586009ee97874655f46481cfbf3f129',
+  TESTNET_PROVIDER_URL: process.env.TESTNET_PROVIDER_URL || 'https://rpc.ankr.com/base_sepolia/b39a19f9ecf66252bf862fe6948021cd1586009ee97874655f46481cfbf3f129',
   
-  // CDP Server Wallet configuration
+  // UseZoracle API configuration
   CDP_NETWORK: process.env.CDP_NETWORK || 'base',
-  CDP_API_URL: process.env.CDP_API_URL || 'https://api.cloud.coinbase.com/api/v2/',
+  ZORACLE_API_URL: process.env.ZORACLE_API_URL || 'https://usezoracle-telegrambot-production.up.railway.app',
   CDP_API_KEY: process.env.CDP_API_KEY,
   CDP_API_SECRET: process.env.CDP_API_SECRET,
-  CDP_SIMULATION_MODE: process.env.NODE_ENV !== 'production', // Use simulation mode in development
+  CDP_WALLET_SECRET: process.env.CDP_WALLET_SECRET,
+  CDP_SIMULATION_MODE: false, // Never use simulation mode as requested
   
   // Trading fees
   FEE_PERCENTAGE: 5, // 0.5% trading fee

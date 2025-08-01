@@ -4,7 +4,7 @@ import { ethers  } from 'ethers';
 import axios from 'axios';
 import * as crypto from 'crypto';
 import { Wallet, Contract, constants  } from 'ethers';
-import { formatEther, parseEther, formatUnits  } from 'ethers/lib/utils';
+import { formatEther, parseEther, formatUnits  } from '../utils/ethersUtils';
 import { escapeMarkdown, escapeMarkdownPreserveFormat } from '../utils/telegramUtils';
 import { markdownToHtml } from '../utils/telegramUtils'; // Added for markdownToHtml
 
@@ -18,13 +18,13 @@ import * as copytrade from '../services/copytrade';
 
 // Environment variables
 const token = process.env.TELEGRAM_BOT_TOKEN;
-const ALCHEMY_API_KEY = process.env.ALCHEMY_API_KEY;
+// No longer need Alchemy API key as we're using Ankr
 
 // Debug log for token
 console.log('📝 Telegram Bot Token:', token ? `${token.substring(0, 10)}...` : 'undefined');
 
 // Validate required environment variables
-if (!token || !ALCHEMY_API_KEY) {
+if (!token) {
   console.error('❌ Required environment variables missing!');
   process.exit(1);
 }
@@ -62,8 +62,8 @@ axios.get(`https://api.telegram.org/bot${token}/deleteWebhook?drop_pending_updat
   });
 
 // Provider setup
-// Use mainnet as the network name for Base (Alchemy supports this)
-const provider = new ethers.providers.JsonRpcProvider(process.env.BASE_MAINNET_RPC || `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`);
+// Use Ankr RPC for Base network
+const provider = new ethers.providers.JsonRpcProvider(process.env.PROVIDER_URL || 'https://rpc.ankr.com/base/b39a19f9ecf66252bf862fe6948021cd1586009ee97874655f46481cfbf3f129');
 
 // Store user data and conversation states
 const users = new Map();
@@ -309,9 +309,9 @@ bot.on('callback_query', async (callbackQuery) => {
     case 'enable_2fa':
       var qr = await walletManager.get2FAQRCode(chatId.toString());
       if (qr.success) {
-        bot.sendPhoto(chatId, Buffer.from(qr.qrCode.split(',')[1], 'base64'), {
-          caption: '📱 *2FA Setup*\n\nScan this QR code with your authenticator app (Google Authenticator, Authy, etc.).\n\nThen enter the 6-digit code to verify:',
-          parse_mode: 'HTML' as const
+        // QR code from UseZoracle API is already a URL, not a base64 string
+        bot.sendMessage(chatId, `📱 *2FA Setup*\n\nScan this QR code with your authenticator app:\n\n${qr.qrCode}\n\nThen enter the 6-digit code to verify:`, {
+          parse_mode: 'Markdown' as const
         });
         conversationStates.set(chatId, 'AWAITING_2FA_TOKEN');
       } else {

@@ -1,11 +1,11 @@
 /**
  * Wallet Handlers for Zoracle Telegram Bot
  */
-import * as walletManager from '../../services/cdpWallet.js';
-import { CONFIG } from '../../config/index.js';
+import * as walletManager from '../../services/cdpWallet';
+import { CONFIG } from '../../config/index';
 import TelegramBot from 'node-telegram-bot-api';
-import { WALLET_STATES } from '../../types/index.js';
-import { escapeMarkdown, escapeMarkdownPreserveFormat, markdownToHtml } from '../../utils/telegramUtils.js';
+import { WALLET_STATES } from '../../types/index';
+import { escapeMarkdown, escapeMarkdownPreserveFormat, markdownToHtml } from '../../utils/telegramUtils';
 
 // Conversation states
 const WALLET_STATE_VALUES = {

@@ -9,7 +9,7 @@
  */
 import { ethers  } from 'ethers';
 import { Wallet, Contract  } from 'ethers';
-import { formatEther, parseEther, formatUnits, parseUnits  } from 'ethers/lib/utils';
+import { formatEther, parseEther, formatUnits, parseUnits  } from '../utils/ethersUtils';
 import axios from 'axios';
 import { CONFIG, ABIS  } from '../config';
 import { TransactionOps, TokenOps  } from '../database/operations';

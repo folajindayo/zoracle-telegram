@@ -3,17 +3,22 @@
   "version": "1.0.0",
   "description": "Telegram bot for Base blockchain token monitoring with Zora content focus",
   "main": "dist/index.js",
-  "type": "module",
   "scripts": {
     "build": "tsc",
     "start": "npm run build && ./scripts/start-with-env.sh",
-    "dev": "ts-node-esm -r dotenv/config src/run.ts",
-    "debug": "NODE_DEBUG=telegram-bot-api ts-node-esm -r dotenv/config src/run.ts",
+    "dev": "ts-node -r dotenv/config src/run.ts",
+    "debug": "NODE_DEBUG=telegram-bot-api ts-node -r dotenv/config src/run.ts",
+    "quick-test": "ts-node src/quick-test.ts",
+    "validate-address": "ts-node src/validate-address.ts",
+    "minimal": "ts-node src/minimal-app.ts",
+    "test-validation": "node src/test-validation.cjs",
+    "test-mempool": "node src/test-mempool.cjs",
+    "test-mock": "node src/test-mempool-mock.cjs",
     "kill-bot": "pkill -f 'node.*run.js' || pkill -f 'ts-node.*run.ts' || echo 'No bot instances running' && curl -s \"https://api.telegram.org/bot$(grep TELEGRAM_BOT_TOKEN .env | cut -d= -f2)/deleteWebhook?drop_pending_updates=true\" > /dev/null",
-    "generate-key": "ts-node-esm -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
-    "db:init": "ts-node-esm -r dotenv/config src/database/init.ts",
-    "db:seed": "ts-node-esm -r dotenv/config scripts/seed-db.ts",
-    "db:test": "ts-node-esm -r dotenv/config scripts/test-mongodb.ts",
+    "generate-key": "ts-node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+    "db:init": "ts-node -r dotenv/config src/database/init.ts",
+    "db:seed": "ts-node -r dotenv/config scripts/seed-db.ts",
+    "db:test": "ts-node -r dotenv/config scripts/test-mongodb.ts",
     "lint": "eslint src/ --ext .ts",
     "lint:fix": "eslint src/ --ext .ts --fix",
     "test": "jest"
@@ -65,6 +70,5 @@
     "zora",
     "nft",
     "monitoring"
-  ],
-  "type": "module"
+  ]
 }
