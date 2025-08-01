@@ -26,9 +26,19 @@ const provider = new ethers.providers.JsonRpcProvider(CONFIG.PROVIDER_URL);
  */
 async function getTokenPrice(tokenAddress, outputTokenAddress = CONFIG.TOKENS.WETH, amount = '1'): Promise<any> {
   try {
+    // Normalize addresses to checksum format to avoid "bad address checksum" errors
+    const checksumTokenAddress = ethers.utils.getAddress(tokenAddress);
+    const checksumOutputAddress = ethers.utils.getAddress(outputTokenAddress);
+    
     // Get token decimals
-    const tokenContract = new Contract(tokenAddress, ABIS.ERC20_ABI, provider);
-    const decimals = await tokenContract.decimals();
+    const tokenContract = new Contract(checksumTokenAddress, ABIS.ERC20_ABI, provider);
+    let decimals;
+    try {
+      decimals = await tokenContract.decimals();
+    } catch (err) {
+      console.warn(`Error getting token decimals for ${checksumTokenAddress}: ${err.message}`);
+      decimals = 18; // Default to 18 decimals if we can't fetch
+    }
     
     // Format amount with proper decimals
     const formattedAmount = parseUnits(amount, decimals);
@@ -36,36 +46,68 @@ async function getTokenPrice(tokenAddress, outputTokenAddress = CONFIG.TOKENS.WE
     // Use Aerodrome router for price quote
     const router = new Contract(CONFIG.DEX_ROUTERS.AERODROME, ABIS.AERODROME_ROUTER_ABI, provider);
     
-    // Get amounts out
-    const [amountOut, stable] = await router.getAmountOut(
-      formattedAmount,
-      tokenAddress,
-      outputTokenAddress
-    );
+    // Get amounts out with retry mechanism
+    let amountOut, stable;
+    try {
+      [amountOut, stable] = await router.getAmountOut(
+        formattedAmount,
+        checksumTokenAddress,
+        checksumOutputAddress
+      );
+    } catch (routerErr) {
+      console.warn(`Router error getting price: ${routerErr.message}`);
+      // Return default price if we can't get from router
+      return {
+        price: "0.000001", // Default low price when we can't fetch
+        stable: false,
+        inputAmount: amount,
+        inputToken: checksumTokenAddress,
+        outputToken: checksumOutputAddress,
+        error: "Failed to get price from router"
+      };
+    }
     
     // Get output token decimals
-    const outputTokenContract = new Contract(outputTokenAddress, ABIS.ERC20_ABI, provider);
-    const outputDecimals = await outputTokenContract.decimals();
+    const outputTokenContract = new Contract(checksumOutputAddress, ABIS.ERC20_ABI, provider);
+    let outputDecimals;
+    try {
+      outputDecimals = await outputTokenContract.decimals();
+    } catch (err) {
+      console.warn(`Error getting output token decimals: ${err.message}`);
+      outputDecimals = 18; // Default to 18 decimals
+    }
     
     // Format amount out
     const formattedAmountOut = formatUnits(amountOut, outputDecimals);
     
-    // Update token price in database
-    await TokenOps.upsertToken(tokenAddress, {
-      lastPrice: formattedAmountOut,
-      priceUpdateTime: new Date()
-    });
+    // Try to update token price in database but don't fail if it doesn't work
+    try {
+      await TokenOps.upsertToken(checksumTokenAddress, {
+        lastPrice: formattedAmountOut,
+        priceUpdateTime: new Date()
+      });
+    } catch (dbErr) {
+      console.warn(`Failed to update token price in database: ${dbErr.message}`);
+    }
     
     return {
       price: formattedAmountOut,
       stable,
       inputAmount: amount,
-      inputToken: tokenAddress,
-      outputToken: outputTokenAddress
+      inputToken: checksumTokenAddress,
+      outputToken: checksumOutputAddress
     };
   } catch (error) {
     console.error(`Error getting token price: ${error.message}`);
-    throw new Error(`Failed to get token price: ${error.message}`);
+    // Return a fallback object instead of throwing
+    return {
+      price: "0.000001", // Default low price
+      stable: false,
+      inputAmount: amount,
+      inputToken: tokenAddress,
+      outputToken: outputTokenAddress,
+      error: `Failed to get token price: ${error.message}`
+    };
   }
 }
 

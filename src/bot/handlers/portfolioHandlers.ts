@@ -23,37 +23,66 @@ module.exports = (bot, users) => {
     }
     
     try {
-      // Get ETH balance
-      const ethBalance = await getEthBalance(user.wallet.address);
-      
-      // In a real implementation, we would fetch all tokens owned by the user
-      // For now, we'll just show ETH and mock some token balances
-      
-      // Mock token balances (in a real implementation, these would be fetched from the blockchain)
-      const mockTokens = [
-        { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', balance: '0.5', price: 3000 },
-        { address: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA', symbol: 'USDC', balance: '100', price: 1 },
-        { address: '0x940181a94a35a4569e4529a3cdfb74e38fd98631', symbol: 'ZORA', balance: '25', price: 2.5 }
-      ];
-      
-      // Calculate total portfolio value
-      let totalValue = parseFloat(ethBalance) * 3000; // Assuming ETH price is $3000
-      
-      for (const token of mockTokens) {
-        totalValue += parseFloat(token.balance) * token.price;
+      // Import the walletManager directly to access real wallet balances
+      const walletManager = require('../../services/cdpWallet');
+
+      // Check if the wallet is unlocked
+      const isUnlocked = walletManager.isWalletUnlocked(userId);
+      if (!isUnlocked) {
+        // Try to unlock the wallet
+        if (user.pin) {
+          await walletManager.quickUnlockWallet(userId, user.pin);
+        } else {
+          bot.sendMessage(chatId, 'Your wallet is locked. Please use /wallet to unlock it first.');
+          return;
+        }
       }
+
+      // Get real wallet balances from UseZoracle API
+      const balanceResult = await walletManager.getWalletBalances(userId);
+      
+      if (!balanceResult.success) {
+        bot.sendMessage(chatId, `❌ Error: ${balanceResult.message}`);
+        return;
+      }
+
+      const balances = balanceResult.balances || {};
+      const tokens = Object.keys(balances);
+      
+      // Simple price mapping for estimation
+      const priceMapping = {
+        'ETH': 3000,
+        'WETH': 3000,
+        'USDC': 1,
+        'USDT': 1,
+        'ZORA': 2.5,
+        'DEFAULT': 1 // Default price for unknown tokens
+      };
+
+      // Calculate total portfolio value
+      let totalValue = 0;
       
       // Build portfolio message
       let portfolioMessage = `
 💼 <b>Your Portfolio</b>
-Total Value: $${totalValue.toFixed(2)}
-
-<b>Holdings:</b>
-• ETH: ${ethBalance} ($${(parseFloat(ethBalance) * 3000).toFixed(2)})
 `;
-      
-      for (const token of mockTokens) {
-        portfolioMessage += `• ${token.symbol}: ${token.balance} ($${(parseFloat(token.balance) * token.price).toFixed(2)})\n`;
+
+      if (tokens.length === 0) {
+        portfolioMessage += `\nTotal Value: N/A\n\n\nNo tokens found in your portfolio.`;
+      } else {
+        // Calculate total value and prepare the holdings display
+        let holdingsText = `\n<b>Holdings:</b>\n`;
+        
+        for (const symbol of tokens) {
+          const balance = parseFloat(balances[symbol]);
+          const price = priceMapping[symbol] || priceMapping.DEFAULT;
+          const value = balance * price;
+          
+          totalValue += value;
+          holdingsText += `• ${symbol}: ${balances[symbol]} ($${value.toFixed(2)})\n`;
+        }
+        
+        portfolioMessage += `Total Value: $${totalValue.toFixed(2)}\n${holdingsText}`;
       }
       
       portfolioMessage += `

@@ -162,6 +162,9 @@ async function searchCoins(query): Promise<any> {
  */
 async function isZoraCoin(tokenAddress): Promise<any> {
   try {
+    // Normalize the address to checksum format to avoid errors
+    const checksumAddress = ethers.utils.getAddress(tokenAddress);
+    
     const query = `
     query IsZoraCoin($address: String) {
       token(id: $address, chain: BASE) {
@@ -173,14 +176,23 @@ async function isZoraCoin(tokenAddress): Promise<any> {
     }
     `;
 
+    // Add timeout and improved error handling
     const response = await axios.post(ZORA_API, {
       query,
-      variables: { address: tokenAddress }
+      variables: { address: checksumAddress }
+    }, {
+      timeout: 5000, // 5 second timeout
+      validateStatus: status => status < 500 // Only treat 5xx as errors
     });
 
-    return !!response.data.data.token;
+    // Check if we have valid data
+    if (response.data && response.data.data) {
+      return !!response.data.data.token;
+    }
+    return false;
   } catch (error) {
     console.error('Error checking Zora coin:', error);
+    // Don't break the flow if API is down, just return false
     return false;
   }
 }

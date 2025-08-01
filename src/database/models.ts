@@ -193,8 +193,15 @@ async function initDb(): Promise<any> {
     const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/zoracle';
     
     await mongoose.connect(mongoUri, {
-      
-      
+      serverSelectionTimeoutMS: 15000, // Increase timeout to 15 seconds
+      socketTimeoutMS: 30000, // Socket timeout
+      connectTimeoutMS: 30000, // Connection timeout
+      heartbeatFrequencyMS: 30000, // How often to ping the server
+      family: 4, // Use IPv4, skip trying IPv6
+      maxPoolSize: 10, // Maintain up to 10 connections
+      minPoolSize: 1, // Keep at least 1 connection
+      retryWrites: true, // Retry write operations
+      retryReads: true, // Retry read operations
     });
     
     console.log('✅ MongoDB connected successfully');

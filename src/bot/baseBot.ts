@@ -352,49 +352,107 @@ bot.on('callback_query', async (callbackQuery) => {
   // Handle portfolio and trading actions
   if (action === 'show_portfolio') {
     try {
-      const portfolioData = await portfolio.getPortfolio(chatId.toString());
+      // Import wallet manager directly
+      const walletManager = require('../services/cdpWallet');
+      const userId = chatId.toString();
+
+      // Get user data
+      if (!users.has(userId)) {
+        users.set(userId, {});
+      }
+      const user = users.get(userId);
       
-      if (portfolioData.success) {
-        let portfolioText = '💰 <b>Your Portfolio</b>\n\n';
-        portfolioText += `Total Value: ${portfolioData.totalUSD ? '$' + portfolioData.totalUSD.toFixed(2) : 'N/A'}\n\n`;
-        
-        if (portfolioData.balances && portfolioData.balances.ETH) {
-          portfolioText += `ETH: ${portfolioData.balances.ETH}\n`;
-        }
-        
-        if (portfolioData.tokens && portfolioData.tokens.length > 0) {
-          portfolioText += '\n<b>Tokens:</b>\n';
-          portfolioData.tokens.forEach(token => {
-            portfolioText += `${token.symbol}: ${token.balance} ($${token.valueUSD ? token.valueUSD.toFixed(2) : 'N/A'})\n`;
-          });
+      // Check if wallet exists
+      if (!walletManager.userHasWallet(userId)) {
+        bot.sendMessage(chatId, '❌ You don\'t have a wallet set up yet. Please use /wallet to create one.');
+        return;
+      }
+      
+      // Check if wallet is unlocked and try to unlock with PIN
+      if (!walletManager.isWalletUnlocked(userId)) {
+        if (user.pin) {
+          const unlockResult = await walletManager.quickUnlockWallet(userId, user.pin);
+          if (!unlockResult.success) {
+            bot.sendMessage(chatId, `❌ Your wallet is locked. Please use /wallet to unlock it first.\n\nError: ${unlockResult.message}`);
+            return;
+          }
         } else {
-          portfolioText += '\nNo tokens found in your portfolio.';
+          bot.sendMessage(chatId, '❌ Your wallet is locked. Please use /wallet to unlock it first.');
+          return;
         }
-        
-        const portfolioOptions = {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: '📊 Transaction History', callback_data: 'show_transactions' }],
-              [{ text: '🔄 Refresh Portfolio', callback_data: 'refresh_portfolio' }],
-              [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
-            ]
-          },
-          parse_mode: 'HTML' as const
-        };
-        
-        bot.sendMessage(chatId, portfolioText, portfolioOptions);
-      } else {
-        bot.sendMessage(chatId, '❌ Failed to load portfolio: ' + portfolioData.message, {
+      }
+      
+      // Get real wallet balances from UseZoracle API
+      const balanceResult = await walletManager.getWalletBalances(userId);
+      
+      if (!balanceResult.success) {
+        bot.sendMessage(chatId, `❌ Failed to load portfolio: ${balanceResult.message}`, {
           reply_markup: {
             inline_keyboard: [
               [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
             ]
           }
         });
+        return;
       }
+      
+      // Process the balance data
+      const balances = balanceResult.balances || {};
+      const tokens = Object.keys(balances);
+      
+      // Simple price mapping for estimation
+      const priceMapping = {
+        'ETH': 3000,
+        'WETH': 3000,
+        'USDC': 1,
+        'USDT': 1,
+        'ZORA': 2.5,
+        'DEFAULT': 1 // Default price for unknown tokens
+      };
+      
+      // Calculate total portfolio value and build message
+      let totalValue = 0;
+      let portfolioText = '💰 <b>Your Portfolio</b>\n\n';
+      
+      if (tokens.length === 0) {
+        portfolioText += 'Total Value: N/A\n\n\nNo tokens found in your portfolio.';
+      } else {
+        // Build token list and calculate total value
+        let tokensList = '';
+        
+        for (const symbol of tokens) {
+          const balance = parseFloat(balances[symbol]);
+          const price = priceMapping[symbol] || priceMapping.DEFAULT;
+          const value = balance * price;
+          
+          totalValue += value;
+          tokensList += `• ${symbol}: ${balances[symbol]} ($${value.toFixed(2)})\n`;
+        }
+        
+        portfolioText += `Total Value: $${totalValue.toFixed(2)}\n\n<b>Holdings:</b>\n${tokensList}`;
+      }
+      
+      const portfolioOptions = {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📊 Transaction History', callback_data: 'show_transactions' }],
+            [{ text: '🔄 Refresh Portfolio', callback_data: 'show_portfolio' }],
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        },
+        parse_mode: 'HTML' as const
+      };
+      
+      bot.sendMessage(chatId, portfolioText, portfolioOptions);
     } catch (error) {
       console.error('Error displaying portfolio:', error);
-      bot.sendMessage(chatId, '❌ An error occurred while loading your portfolio.');
+      bot.sendMessage(chatId, `❌ An error occurred while loading your portfolio: ${error.message}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        }
+      });
     }
   } 
   else if (action === 'show_trade_options') {
@@ -452,6 +510,368 @@ bot.on('callback_query', async (callbackQuery) => {
       bot.sendMessage(chatId, '❌ An error occurred while loading your tokens.');
     }
   }
+  else if (action.startsWith('confirm_buy_')) {
+    // Parse the confirmation data (slippage_amount_tokenAddress)
+    const parts = action.split('_');
+    if (parts.length < 4) return;
+    
+    const slippage = parseFloat(parts[2]);
+    const amount = parts[3];
+    
+    // Normalize token address to checksum format
+    let tokenAddress;
+    try {
+      tokenAddress = ethers.utils.getAddress(parts[4]);
+    } catch (error) {
+      bot.sendMessage(chatId, '❌ <b>Invalid Token Address Format</b>\n\nThe token address format is invalid.', {
+        parse_mode: 'HTML' as const
+      });
+      return;
+    }
+    
+    bot.sendMessage(chatId, '⏳ <b>Processing Trade</b>\n\nExecuting your purchase, please wait...', {
+      parse_mode: 'HTML' as const
+    });
+    
+    try {
+      // Get trading service
+      const trading = await import('../services/trading');
+      
+      // Execute the trade
+      const result = await trading.executeSwap(chatId.toString(), tokenAddress, amount, true, slippage);
+      
+      if (result.txHash) {
+        // Format success message
+        let successMsg = `✅ <b>Trade Successful!</b>\n\n`;
+        successMsg += `You bought ${result.tokenAmount || 'tokens'} using ${amount} ETH.\n\n`;
+        successMsg += `<a href="https://basescan.org/tx/${result.txHash}">View on BaseScan</a>`;
+        
+        bot.sendMessage(chatId, successMsg, {
+          parse_mode: 'HTML' as const,
+          disable_web_page_preview: true
+        });
+        
+        // Clear conversation state
+        conversationStates.delete(chatId);
+      } else {
+        throw new Error('Transaction failed');
+      }
+    } catch (error) {
+      console.error('Error executing buy trade:', error);
+      bot.sendMessage(chatId, `❌ <b>Trade Failed</b>\n\n${error.message}`, {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 Try Again', callback_data: 'trade_buy' }]
+          ]
+        }
+      });
+      conversationStates.delete(chatId);
+    }
+  }
+  else if (action === 'cancel_trade') {
+    bot.sendMessage(chatId, '❌ <b>Trade Cancelled</b>', {
+      parse_mode: 'HTML' as const,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔙 Back to Trade Options', callback_data: 'show_trade_options' }]
+        ]
+      }
+    });
+    conversationStates.delete(chatId);
+  }
+  else if (action === 'use_max_eth') {
+    try {
+      // Get user's ETH balance
+      const balanceResult = await getEthBalance(chatId.toString());
+      const ethBalance = balanceResult.balance || '0';
+      
+      // Calculate max amount (with buffer for gas)
+      const maxAmount = parseFloat(ethBalance) * 0.95;
+      const amountETH = maxAmount.toFixed(6);
+      
+      // Get token info from user data
+      const userData = users.get(chatId.toString()) || {};
+      const buyToken = userData.buyToken;
+      
+      if (!buyToken || !buyToken.address) {
+        throw new Error('Token information not found.');
+      }
+      
+      // Ask for confirmation with slippage options
+      const confirmMessage = `🔄 <b>Confirm Trade</b>\n\n` +
+        `You are about to buy tokens with ${amountETH} ETH (maximum available).\n\n` +
+        `Token: ${buyToken.info?.name || buyToken.address}\n` +
+        `Price: ${buyToken.price} ETH\n\n` +
+        `Please select your slippage tolerance:`;
+      
+      bot.sendMessage(chatId, confirmMessage, {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '0.5%', callback_data: `confirm_buy_0.5_${amountETH}_${buyToken.address}` },
+              { text: '1%', callback_data: `confirm_buy_1.0_${amountETH}_${buyToken.address}` },
+              { text: '2%', callback_data: `confirm_buy_2.0_${amountETH}_${buyToken.address}` }
+            ],
+            [
+              { text: '❌ Cancel', callback_data: 'cancel_trade' }
+            ]
+          ]
+        }
+      });
+      
+      // Update conversation state
+      conversationStates.set(chatId, 'AWAITING_BUY_CONFIRM');
+      
+    } catch (error) {
+      console.error('Error processing max ETH input:', error);
+      bot.sendMessage(chatId, `❌ <b>Error</b>\n\n${error.message}`, {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 Try Again', callback_data: 'trade_buy' }]
+          ]
+        }
+      });
+      conversationStates.delete(chatId);
+    }
+  }
+  else if (action.startsWith('sell_token_')) {
+    // Extract token address from action and convert to checksum format
+    let tokenAddress;
+    try {
+      tokenAddress = ethers.utils.getAddress(action.substring('sell_token_'.length));
+    } catch (error) {
+      bot.sendMessage(chatId, '❌ <b>Invalid Token Address</b>\n\nThe token address format is invalid.', {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 Try Again', callback_data: 'trade_sell' }]
+          ]
+        }
+      });
+      return;
+    }
+    
+    try {
+      // Create token contract to get details
+      const provider = new ethers.providers.JsonRpcProvider(process.env.PROVIDER_URL || 'https://rpc.ankr.com/base/b39a19f9ecf66252bf862fe6948021cd1586009ee97874655f46481cfbf3f129');
+      const tokenContract = new ethers.Contract(
+        tokenAddress,
+        [
+          "function name() view returns (string)",
+          "function symbol() view returns (string)",
+          "function decimals() view returns (uint8)",
+          "function totalSupply() view returns (uint256)",
+          "function balanceOf(address) view returns (uint256)"
+        ],
+        provider
+      );
+      
+      // Get wallet address
+      const walletAddress = walletManager.getWalletAddress(chatId.toString());
+      if (!walletAddress) {
+        throw new Error('Wallet not found or locked.');
+      }
+      
+      // Fetch detailed token information
+      const [name, symbol, decimals, totalSupply, userBalance] = await Promise.all([
+        tokenContract.name().catch(() => "Unknown Token"),
+        tokenContract.symbol().catch(() => "????"),
+        tokenContract.decimals().catch(() => 18),
+        tokenContract.totalSupply().catch(() => ethers.BigNumber.from("0")),
+        tokenContract.balanceOf(walletAddress).catch(() => ethers.BigNumber.from("0"))
+      ]);
+      
+      // Format supply and balance with appropriate decimals
+      const formattedTotalSupply = ethers.utils.formatUnits(totalSupply, decimals);
+      const formattedUserBalance = ethers.utils.formatUnits(userBalance, decimals);
+      
+      // Get token price
+      const trading = await import('../services/trading');
+      const priceQuote = await trading.getTokenPrice(tokenAddress);
+      
+      // Calculate ETH value of user's tokens
+      const ethValue = parseFloat(formattedUserBalance) * parseFloat(priceQuote.price);
+      
+      // Send detailed token info message
+      const detailedTokenInfo = `🔍 <b>Token Information</b>\n\n` +
+        `<b>Name:</b> ${name}\n` +
+        `<b>Symbol:</b> ${symbol}\n` +
+        `<b>Address:</b> <code>${tokenAddress}</code>\n` +
+        `<b>Decimals:</b> ${decimals}\n` +
+        `<b>Total Supply:</b> ${parseFloat(formattedTotalSupply).toLocaleString()} ${symbol}\n` +
+        `<b>Current Price:</b> ${priceQuote.price} ETH\n\n` +
+        `<b>Your Balance:</b> ${parseFloat(formattedUserBalance).toLocaleString()} ${symbol}\n` +
+        `<b>Value:</b> ~${ethValue.toFixed(6)} ETH`;
+      
+      // Add BaseScan link
+      const basescanLink = `\n<a href="https://basescan.org/token/${tokenAddress}">View on BaseScan</a>`;
+      
+      // First, send the token details message
+      await bot.sendMessage(chatId, detailedTokenInfo + basescanLink, {
+        parse_mode: 'HTML' as const,
+        disable_web_page_preview: true
+      });
+      
+      // Get user data object or create it
+      if (!users.has(chatId.toString())) {
+        users.set(chatId.toString(), {});
+      }
+      
+      // Store token info in user data
+      const userData = users.get(chatId.toString());
+      userData.sellToken = {
+        address: tokenAddress,
+        info: {
+          name,
+          symbol,
+          decimals,
+          totalSupply: formattedTotalSupply,
+        },
+        balance: formattedUserBalance,
+        price: priceQuote.price
+      };
+      
+      // Update conversation state
+      conversationStates.set(chatId, 'AWAITING_SELL_AMOUNT');
+      
+      // Ask for amount to sell
+      const message = `💸 <b>Sell ${name} (${symbol})</b>\n\n` +
+        `How many tokens would you like to sell? (You can also type "max" to sell your entire balance)`;
+      
+      bot.sendMessage(chatId, message, {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💰 Sell Max Balance', callback_data: 'sell_max_tokens' }],
+            [{ text: '❌ Cancel', callback_data: 'cancel_trade' }]
+          ]
+        }
+      });
+      
+    } catch (error) {
+      console.error('Error processing token sell selection:', error);
+      bot.sendMessage(chatId, `❌ <b>Error</b>\n\n${error.message}`, {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 Try Again', callback_data: 'trade_sell' }]
+          ]
+        }
+      });
+    }
+  }
+  else if (action === 'sell_max_tokens') {
+    try {
+      // Get token info from user data
+      const userData = users.get(chatId.toString()) || {};
+      const sellToken = userData.sellToken;
+      
+      if (!sellToken || !sellToken.address || !sellToken.balance) {
+        throw new Error('Token information not found.');
+      }
+      
+      // Calculate estimated ETH to receive
+      const estimatedETH = parseFloat(sellToken.balance) * parseFloat(sellToken.price);
+      
+      // Ask for confirmation with slippage options
+      const confirmMessage = `🔄 <b>Confirm Trade</b>\n\n` +
+        `You are about to sell ${sellToken.balance} ${sellToken.info.symbol} (your entire balance).\n\n` +
+        `Estimated to receive: ~${estimatedETH.toFixed(6)} ETH\n\n` +
+        `Please select your slippage tolerance:`;
+      
+      bot.sendMessage(chatId, confirmMessage, {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '0.5%', callback_data: `confirm_sell_0.5_${sellToken.balance}_${sellToken.address}` },
+              { text: '1%', callback_data: `confirm_sell_1.0_${sellToken.balance}_${sellToken.address}` },
+              { text: '2%', callback_data: `confirm_sell_2.0_${sellToken.balance}_${sellToken.address}` }
+            ],
+            [
+              { text: '❌ Cancel', callback_data: 'cancel_trade' }
+            ]
+          ]
+        }
+      });
+      
+      // Update conversation state
+      conversationStates.set(chatId, 'AWAITING_SELL_CONFIRM');
+      
+    } catch (error) {
+      console.error('Error processing max token sell:', error);
+      bot.sendMessage(chatId, `❌ <b>Error</b>\n\n${error.message}`, {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 Try Again', callback_data: 'trade_sell' }]
+          ]
+        }
+      });
+    }
+  }
+  else if (action.startsWith('confirm_sell_')) {
+    // Parse the confirmation data (slippage_amount_tokenAddress)
+    const parts = action.split('_');
+    if (parts.length < 4) return;
+    
+    const slippage = parseFloat(parts[2]);
+    const amount = parts[3];
+    
+    // Normalize token address to checksum format
+    let tokenAddress;
+    try {
+      tokenAddress = ethers.utils.getAddress(parts[4]);
+    } catch (error) {
+      bot.sendMessage(chatId, '❌ <b>Invalid Token Address Format</b>\n\nThe token address format is invalid.', {
+        parse_mode: 'HTML' as const
+      });
+      return;
+    }
+    
+    bot.sendMessage(chatId, '⏳ <b>Processing Trade</b>\n\nExecuting your sale, please wait...', {
+      parse_mode: 'HTML' as const
+    });
+    
+    try {
+      // Get trading service
+      const trading = await import('../services/trading');
+      
+      // Execute the trade
+      const result = await trading.executeSwap(chatId.toString(), tokenAddress, amount, false, slippage);
+      
+      if (result.txHash) {
+        // Format success message
+        let successMsg = `✅ <b>Trade Successful!</b>\n\n`;
+        successMsg += `You sold ${amount} tokens for ${result.ethAmount || '0'} ETH.\n\n`;
+        successMsg += `<a href="https://basescan.org/tx/${result.txHash}">View on BaseScan</a>`;
+        
+        bot.sendMessage(chatId, successMsg, {
+          parse_mode: 'HTML' as const,
+          disable_web_page_preview: true
+        });
+        
+        // Clear conversation state
+        conversationStates.delete(chatId);
+      } else {
+        throw new Error('Transaction failed');
+      }
+    } catch (error) {
+      console.error('Error executing sell trade:', error);
+      bot.sendMessage(chatId, `❌ <b>Trade Failed</b>\n\n${error.message}`, {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 Try Again', callback_data: 'trade_sell' }]
+          ]
+        }
+      });
+      conversationStates.delete(chatId);
+    }
+  }
   else if (action === 'show_discover') {
     const discoverOptions = {
       reply_markup: {
@@ -466,6 +886,20 @@ bot.on('callback_query', async (callbackQuery) => {
     };
     
     bot.sendMessage(chatId, '🔍 *Discover*\n\nExplore Zora content coins:', discoverOptions);
+  }
+  else if (action === 'show_copy_trading') {
+    const copyTradeOptions = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '➕ Add Mirror', callback_data: 'add_mirror' }],
+          [{ text: '📋 View Active Mirrors', callback_data: 'view_mirrors' }],
+          [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+        ]
+      },
+      parse_mode: 'HTML' as const
+    };
+    
+    bot.sendMessage(chatId, '👥 <b>Copy Trading</b>\n\nMirror trades from other wallets automatically.', copyTradeOptions);
   }
   else if (action === 'discover_new') {
     try {
@@ -500,6 +934,172 @@ bot.on('callback_query', async (callbackQuery) => {
     } catch (error) {
       console.error('Error getting new coins:', error);
       bot.sendMessage(chatId, '❌ An error occurred while fetching new coins.');
+    }
+  }
+  else if (action === 'add_mirror') {
+    // Direct implementation for copy trading setup
+    try {
+      // Prompt for wallet address
+      bot.sendMessage(chatId, 'Please enter the wallet address you want to mirror trades from:');
+      
+      // Create mirror directly, bypassing PIN checks
+      conversationStates.set(chatId, 'AWAITING_MIRROR_WALLET');
+    } catch (error) {
+      console.error('Error starting copy trade setup:', error);
+      bot.sendMessage(chatId, '❌ Error: Could not start copy trading setup. Try again later.');
+    }
+  }
+  else if (action === 'view_mirrors') {
+    try {
+      // Show a loading message
+      const loadingMessage = await bot.sendMessage(chatId, '⏳ Loading your mirrors...');
+      
+      // Get user's copy-trades from database with increased timeout
+      const copyTradeOps = require('../database/operations').CopyTradeOps;
+      
+      // Use a Promise.race with a timeout to prevent blocking
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Database query timed out')), 7000);
+      });
+      
+      // Fetch user's copy trades with increased timeout (8 seconds)
+      const userCopyTradesPromise = copyTradeOps.getUserCopyTrades(chatId.toString(), 8000);
+      
+      // Race between the fetch and the timeout
+      const userCopyTrades = await Promise.race([
+        userCopyTradesPromise,
+        timeoutPromise
+      ]).catch(error => {
+        console.error('Error fetching mirrors (Promise.race):', error);
+        // Return empty array on error
+        return [];
+      });
+      
+      // Delete the loading message
+      bot.deleteMessage(chatId, loadingMessage.message_id).catch(e => console.error('Error deleting loading message:', e));
+      
+      if (!userCopyTrades || userCopyTrades.length === 0) {
+        const options = {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '➕ Add Mirror', callback_data: 'add_mirror' }],
+              [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+            ]
+          }
+        };
+        
+        bot.sendMessage(chatId, 'You don\'t have any active mirrors. Click "Add Mirror" to set up copy trading.', options);
+        return;
+      }
+      
+      // Create message with all mirrors
+      let message = '🔄 <b>Your Active Mirrors:</b>\n\n';
+      
+      for (let i = 0; i < userCopyTrades.length; i++) {
+        const copyTrade = userCopyTrades[i];
+        const status = copyTrade.active ? '✅ Active' : '⏸️ Paused';
+        const mode = copyTrade.sandboxMode ? '🧪 Sandbox' : '🔴 Live';
+        
+        // Safe access to prevent errors if data is malformed
+        const targetWallet = copyTrade.targetWallet || '0x0000000000000000000000000000000000000000';
+        const maxEthPerTrade = copyTrade.maxEthPerTrade || '0';
+        const slippage = copyTrade.slippage || 1;
+        
+        const walletAddr = `${targetWallet.substring(0, 6)}...${targetWallet.substring(targetWallet.length - 4)}`;
+        
+        message += `${i + 1}. <code>${walletAddr}</code>\n`;
+        message += `   Status: ${status}\n`;
+        message += `   Mode: ${mode}\n`;
+        message += `   Max ETH per trade: ${maxEthPerTrade} ETH\n`;
+        message += `   Slippage: ${slippage}%\n\n`;
+      }
+      
+      // Add inline keyboard for actions
+      const options = {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '➕ Add Mirror', callback_data: 'add_mirror' },
+              { text: '🗑️ Remove Mirror', callback_data: 'remove_mirror' }
+            ],
+            [
+              { text: '⏸️ Pause Mirror', callback_data: 'pause_mirror' },
+              { text: '▶️ Resume Mirror', callback_data: 'resume_mirror' }
+            ],
+            [
+              { text: '🧪 Toggle Sandbox', callback_data: 'toggle_sandbox' },
+              { text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }
+            ]
+          ]
+        }
+      };
+      
+      bot.sendMessage(chatId, message, options);
+    } catch (error) {
+      console.error('Error fetching mirrors:', error);
+      bot.sendMessage(chatId, `❌ Error fetching your mirrors: ${error.message}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 Try Again', callback_data: 'view_mirrors' }],
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        }
+      });
+    }
+  }
+  else if (action === 'mirror_sandbox_yes' || action === 'mirror_sandbox_no') {
+    try {
+      // Get user data
+      if (!users.has(chatId.toString())) {
+        users.set(chatId.toString(), {});
+      }
+      const userData = users.get(chatId.toString());
+      
+      // Set sandbox mode
+      const sandboxMode = action === 'mirror_sandbox_yes';
+      userData.mirrorSandbox = sandboxMode;
+      
+      // Process mirror setup directly without PIN check
+      const copyTradeService = require('../services/copytrade');
+      
+      // Add copy trade - use configureMirror instead of addCopyTrade
+      copyTradeService.configureMirror(
+        chatId.toString(),
+        userData.mirrorTarget,
+        userData.mirrorSlippage,
+        userData.mirrorSandbox
+      );
+      
+      // Success message
+      const modeText = sandboxMode ? '🧪 Sandbox Mode (Simulated)' : '🔴 Live Mode (Real)';
+      const walletAddr = `${userData.mirrorTarget.substring(0, 6)}...${userData.mirrorTarget.substring(userData.mirrorTarget.length - 4)}`;
+      
+      bot.sendMessage(chatId, 
+        '✅ <b>Copy-trade set up successfully!</b>\n\n' +
+        `Target wallet: <code>${walletAddr}</code>\n` +
+        `Max ETH per trade: ${userData.mirrorMaxEth} ETH\n` +
+        `Slippage: ${userData.mirrorSlippage}%\n` +
+        `Mode: ${modeText}\n\n` +
+        'You will now automatically mirror trades from this wallet.', 
+        { parse_mode: 'HTML' as const }
+      );
+      
+      // Clear conversation state
+      conversationStates.delete(chatId);
+      
+      // Clear mirror setup data
+      delete userData.mirrorTarget;
+      delete userData.mirrorMaxEth;
+      delete userData.mirrorSlippage;
+      delete userData.mirrorSandbox;
+      
+    } catch (error) {
+      console.error('Error setting up copy-trade:', error);
+      bot.sendMessage(chatId, `❌ <b>Error setting up copy-trade</b>:\n\n${error.message}`, 
+        { parse_mode: 'HTML' as const }
+      );
+      conversationStates.delete(chatId);
     }
   }
   else if (action === 'back_to_main') {
@@ -759,6 +1359,434 @@ bot.on('message', async (msg) => {
             ]
           }
         });
+      }
+      break;
+
+    case 'AWAITING_BUY_TOKEN':
+      // User entered token address for buying
+      let inputTokenAddress = msg.text.trim();
+      
+      try {
+        // Check if wallet is unlocked
+        if (!walletManager.isWalletUnlocked(chatId.toString())) {
+          bot.sendMessage(chatId, '🔒 <b>Wallet Locked</b>\n\nYou need to unlock your wallet first.', {
+            parse_mode: 'HTML' as const,
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔓 Unlock Wallet', callback_data: 'wallet_unlock' }]
+              ]
+            }
+          });
+          conversationStates.delete(chatId);
+          return;
+        }
+        
+        // Validate and normalize token address
+        let tokenAddress;
+        try {
+          // Convert to checksum address format
+          tokenAddress = ethers.utils.getAddress(inputTokenAddress);
+        } catch (error) {
+          bot.sendMessage(chatId, '❌ <b>Invalid Address</b>\n\nPlease enter a valid token contract address.', {
+            parse_mode: 'HTML' as const,
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Try Again', callback_data: 'trade_buy' }]
+              ]
+            }
+          });
+          return;
+        }
+        
+        // Get token info
+        const tokenInfo = await getTokenInfo(tokenAddress);
+        
+        // Get token price and additional data
+        const trading = await import('../services/trading');
+        const priceQuote = await trading.getTokenPrice(tokenAddress);
+        
+        // Create token contract to get additional details
+        const provider = new ethers.providers.JsonRpcProvider(process.env.PROVIDER_URL || 'https://rpc.ankr.com/base/b39a19f9ecf66252bf862fe6948021cd1586009ee97874655f46481cfbf3f129');
+        const tokenContract = new ethers.Contract(
+          tokenAddress,
+          [
+            "function name() view returns (string)",
+            "function symbol() view returns (string)",
+            "function decimals() view returns (uint8)",
+            "function totalSupply() view returns (uint256)",
+            "function balanceOf(address) view returns (uint256)"
+          ],
+          provider
+        );
+        
+        // Fetch detailed token information
+        const [name, symbol, decimals, totalSupply] = await Promise.all([
+          tokenContract.name().catch(() => "Unknown Token"),
+          tokenContract.symbol().catch(() => "????"),
+          tokenContract.decimals().catch(() => 18),
+          tokenContract.totalSupply().catch(() => ethers.BigNumber.from("0"))
+        ]);
+        
+        // Format total supply with appropriate decimals
+        const formattedTotalSupply = ethers.utils.formatUnits(totalSupply, decimals);
+        
+        // Send detailed token info message
+        const detailedTokenInfo = `🔍 <b>Token Information</b>\n\n` +
+          `<b>Name:</b> ${name}\n` +
+          `<b>Symbol:</b> ${symbol}\n` +
+          `<b>Address:</b> <code>${tokenAddress}</code>\n` +
+          `<b>Decimals:</b> ${decimals}\n` +
+          `<b>Total Supply:</b> ${parseFloat(formattedTotalSupply).toLocaleString()} ${symbol}\n` +
+          `<b>Current Price:</b> ${priceQuote.price} ETH\n`;
+          
+        // Add BaseScan link
+        const basescanLink = `<a href="https://basescan.org/token/${tokenAddress}">View on BaseScan</a>`;
+        
+        // First, send the token details message
+        await bot.sendMessage(chatId, detailedTokenInfo + "\n" + basescanLink, {
+          parse_mode: 'HTML' as const,
+          disable_web_page_preview: true
+        });
+        
+        // Update conversation state with token info
+        conversationStates.set(chatId, 'AWAITING_BUY_AMOUNT');
+        userData.buyToken = {
+          address: tokenAddress,
+          info: {
+            name,
+            symbol,
+            decimals,
+            totalSupply: formattedTotalSupply,
+            ...tokenInfo
+          },
+          price: priceQuote.price
+        };
+        
+        // Then ask for amount to buy
+        let message = `💵 <b>Buy ${name} (${symbol})</b>\n\n`;
+        message += 'How much ETH would you like to spend? (You can also type "max" to spend all available ETH)';
+        
+        bot.sendMessage(chatId, message, {
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '❌ Cancel Trade', callback_data: 'cancel_trade' }]
+            ]
+          }
+        });
+      } catch (error) {
+        console.error('Error processing buy token input:', error);
+        bot.sendMessage(chatId, `❌ <b>Error</b>\n\n${error.message}`, {
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Try Again', callback_data: 'trade_buy' }]
+            ]
+          }
+        });
+        conversationStates.delete(chatId);
+      }
+      break;
+      
+    case 'AWAITING_BUY_AMOUNT':
+      // User entered amount of ETH to spend
+      let amountInput = msg.text.trim();
+      let amountETH;
+      
+      try {
+        // Check if wallet is still unlocked
+        if (!walletManager.isWalletUnlocked(chatId.toString())) {
+          bot.sendMessage(chatId, '🔒 <b>Wallet Locked</b>\n\nYour wallet has been locked due to inactivity.', {
+            parse_mode: 'HTML' as const,
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔓 Unlock Wallet', callback_data: 'wallet_unlock' }]
+              ]
+            }
+          });
+          conversationStates.delete(chatId);
+          return;
+        }
+        
+        // Get user's ETH balance
+        const balanceResult = await getEthBalance(chatId.toString());
+        const ethBalance = balanceResult.balance || '0';
+        
+        if (amountInput.toLowerCase() === 'max') {
+          // Use max balance minus gas buffer
+          const maxAmount = parseFloat(ethBalance) * 0.95; // 5% buffer for gas
+          amountETH = maxAmount.toFixed(6);
+        } else {
+          // Parse user input
+          amountETH = amountInput;
+          
+          // Validate amount
+          const parsedAmount = parseFloat(amountETH);
+          if (isNaN(parsedAmount) || parsedAmount <= 0) {
+            bot.sendMessage(chatId, '❌ <b>Invalid Amount</b>\n\nPlease enter a valid ETH amount.', {
+              parse_mode: 'HTML' as const
+            });
+            return;
+          }
+          
+          // Check if user has enough ETH
+          if (parsedAmount > parseFloat(ethBalance)) {
+            bot.sendMessage(chatId, `❌ <b>Insufficient Balance</b>\n\nYou have ${ethBalance} ETH available.`, {
+              parse_mode: 'HTML' as const,
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '💰 Use Max Balance', callback_data: 'use_max_eth' }]
+                ]
+              }
+            });
+            return;
+          }
+        }
+        
+        // Get token info from user data
+        const buyToken = userData.buyToken;
+        if (!buyToken || !buyToken.address) {
+          throw new Error('Token information not found.');
+        }
+        
+        // Ask for confirmation with slippage options
+        const confirmMessage = `🔄 <b>Confirm Trade</b>\n\n` +
+          `You are about to buy tokens with ${amountETH} ETH.\n\n` +
+          `Token: ${buyToken.info?.name || buyToken.address}\n` +
+          `Price: ${buyToken.price} ETH\n\n` +
+          `Please select your slippage tolerance:`;
+        
+        bot.sendMessage(chatId, confirmMessage, {
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '0.5%', callback_data: `confirm_buy_0.5_${amountETH}_${buyToken.address}` },
+                { text: '1%', callback_data: `confirm_buy_1.0_${amountETH}_${buyToken.address}` },
+                { text: '2%', callback_data: `confirm_buy_2.0_${amountETH}_${buyToken.address}` }
+              ],
+              [
+                { text: '❌ Cancel', callback_data: 'cancel_trade' }
+              ]
+            ]
+          }
+        });
+        
+        // Update conversation state
+        conversationStates.set(chatId, 'AWAITING_BUY_CONFIRM');
+        
+      } catch (error) {
+        console.error('Error processing buy amount input:', error);
+        bot.sendMessage(chatId, `❌ <b>Error</b>\n\n${error.message}`, {
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Try Again', callback_data: 'trade_buy' }]
+            ]
+          }
+        });
+        conversationStates.delete(chatId);
+      }
+      break;
+      
+    case 'AWAITING_MIRROR_WALLET':
+      // User entered wallet address to mirror
+      const mirrorWalletAddress = msg.text.trim();
+      
+      try {
+        // Validate the address
+        if (!ethers.utils.isAddress(mirrorWalletAddress)) {
+          bot.sendMessage(chatId, '❌ <b>Invalid Address</b>\n\nPlease enter a valid Ethereum address.', {
+            parse_mode: 'HTML' as const,
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Try Again', callback_data: 'add_mirror' }]
+              ]
+            }
+          });
+          conversationStates.delete(chatId);
+          return;
+        }
+        
+        // Update state and ask for slippage
+        conversationStates.set(chatId, 'AWAITING_MIRROR_SLIPPAGE');
+        userData.mirrorTarget = mirrorWalletAddress;
+        
+        bot.sendMessage(chatId, 'Please enter the maximum slippage percentage (1-10):');
+      } catch (error) {
+        console.error('Error processing mirror wallet:', error);
+        bot.sendMessage(chatId, `❌ <b>Error</b>\n\n${error.message}`, {
+          parse_mode: 'HTML' as const
+        });
+        conversationStates.delete(chatId);
+      }
+      break;
+      
+    case 'AWAITING_MIRROR_SLIPPAGE':
+      // User entered slippage percentage
+      const slippageInput = msg.text.trim();
+      
+      try {
+        // Validate slippage
+        const slippage = parseFloat(slippageInput);
+        
+        if (isNaN(slippage) || slippage < 0.1 || slippage > 10) {
+          bot.sendMessage(chatId, '❌ <b>Invalid Slippage</b>\n\nPlease enter a number between 0.1 and 10.', {
+            parse_mode: 'HTML' as const
+          });
+          return;
+        }
+        
+        // Update state and ask for max ETH per trade
+        conversationStates.set(chatId, 'AWAITING_MIRROR_MAX_ETH');
+        userData.mirrorSlippage = slippage;
+        
+        bot.sendMessage(chatId, 'Please enter the maximum ETH per trade:');
+      } catch (error) {
+        console.error('Error processing mirror slippage:', error);
+        bot.sendMessage(chatId, `❌ <b>Error</b>\n\n${error.message}`, {
+          parse_mode: 'HTML' as const
+        });
+        conversationStates.delete(chatId);
+      }
+      break;
+      
+    case 'AWAITING_MIRROR_MAX_ETH':
+      // User entered max ETH per trade
+      const maxEthInput = msg.text.trim();
+      
+      try {
+        // Validate max ETH
+        const maxEthPerTrade = parseFloat(maxEthInput);
+        
+        if (isNaN(maxEthPerTrade) || maxEthPerTrade <= 0) {
+          bot.sendMessage(chatId, '❌ <b>Invalid Amount</b>\n\nPlease enter a positive number.', {
+            parse_mode: 'HTML' as const
+          });
+          return;
+        }
+        
+        // Ask for sandbox mode
+        conversationStates.set(chatId, 'AWAITING_MIRROR_SANDBOX');
+        userData.mirrorMaxEth = maxEthPerTrade;
+        
+        const options = {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '🧪 Sandbox Mode (Simulated)', callback_data: 'mirror_sandbox_yes' },
+                { text: '🔴 Live Mode (Real)', callback_data: 'mirror_sandbox_no' }
+              ]
+            ]
+          },
+          parse_mode: 'HTML' as const
+        };
+        
+        bot.sendMessage(chatId, 'Do you want to enable sandbox mode? In sandbox mode, trades will be simulated and no real transactions will be made.', options);
+      } catch (error) {
+        console.error('Error processing mirror max ETH:', error);
+        bot.sendMessage(chatId, `❌ <b>Error</b>\n\n${error.message}`, {
+          parse_mode: 'HTML' as const
+        });
+        conversationStates.delete(chatId);
+      }
+      break;
+      
+    case 'AWAITING_SELL_AMOUNT':
+      // User entered amount of tokens to sell
+      let tokenAmountInput = msg.text.trim();
+      let tokenAmount;
+      
+      try {
+        // Check if wallet is still unlocked
+        if (!walletManager.isWalletUnlocked(chatId.toString())) {
+          bot.sendMessage(chatId, '🔒 <b>Wallet Locked</b>\n\nYour wallet has been locked due to inactivity.', {
+            parse_mode: 'HTML' as const,
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔓 Unlock Wallet', callback_data: 'wallet_unlock' }]
+              ]
+            }
+          });
+          conversationStates.delete(chatId);
+          return;
+        }
+        
+        // Get token info from user data
+        const sellToken = userData.sellToken;
+        if (!sellToken || !sellToken.address || !sellToken.balance) {
+          throw new Error('Token information not found.');
+        }
+        
+        if (tokenAmountInput.toLowerCase() === 'max') {
+          // Use entire token balance
+          tokenAmount = sellToken.balance;
+        } else {
+          // Parse user input
+          tokenAmount = tokenAmountInput;
+          
+          // Validate amount
+          const parsedAmount = parseFloat(tokenAmount);
+          if (isNaN(parsedAmount) || parsedAmount <= 0) {
+            bot.sendMessage(chatId, '❌ <b>Invalid Amount</b>\n\nPlease enter a valid token amount.', {
+              parse_mode: 'HTML' as const
+            });
+            return;
+          }
+          
+          // Check if user has enough tokens
+          if (parsedAmount > parseFloat(sellToken.balance)) {
+            bot.sendMessage(chatId, `❌ <b>Insufficient Balance</b>\n\nYou have ${sellToken.balance} ${sellToken.info.symbol} available.`, {
+              parse_mode: 'HTML' as const,
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '💰 Use Max Balance', callback_data: 'sell_max_tokens' }]
+                ]
+              }
+            });
+            return;
+          }
+        }
+        
+        // Calculate estimated ETH to receive
+        const estimatedETH = parseFloat(tokenAmount) * parseFloat(sellToken.price);
+        
+        // Ask for confirmation with slippage options
+        const confirmMessage = `🔄 <b>Confirm Trade</b>\n\n` +
+          `You are about to sell ${tokenAmount} ${sellToken.info.symbol}.\n\n` +
+          `Estimated to receive: ~${estimatedETH.toFixed(6)} ETH\n\n` +
+          `Please select your slippage tolerance:`;
+        
+        bot.sendMessage(chatId, confirmMessage, {
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '0.5%', callback_data: `confirm_sell_0.5_${tokenAmount}_${sellToken.address}` },
+                { text: '1%', callback_data: `confirm_sell_1.0_${tokenAmount}_${sellToken.address}` },
+                { text: '2%', callback_data: `confirm_sell_2.0_${tokenAmount}_${sellToken.address}` }
+              ],
+              [
+                { text: '❌ Cancel', callback_data: 'cancel_trade' }
+              ]
+            ]
+          }
+        });
+        
+        // Update conversation state
+        conversationStates.set(chatId, 'AWAITING_SELL_CONFIRM');
+        
+      } catch (error) {
+        console.error('Error processing sell amount input:', error);
+        bot.sendMessage(chatId, `❌ <b>Error</b>\n\n${error.message}`, {
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Try Again', callback_data: 'trade_sell' }]
+            ]
+          }
+        });
+        conversationStates.delete(chatId);
       }
       break;
   }

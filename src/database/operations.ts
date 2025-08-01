@@ -302,36 +302,92 @@ const CopyTradeOps = {
   /**
    * Get user's copy trades
    * @param {string} telegramId - Telegram ID
+   * @param {number} timeout - Optional timeout in milliseconds
    * @returns {Promise<Array>} Array of copy trade objects
    */
-  async getUserCopyTrades(telegramId) {
-    return await CopyTrade.find({ telegramId });
+  async getUserCopyTrades(telegramId, timeout = 5000) {
+    try {
+      // Create a query with timeout option
+      const query = CopyTrade.find({ telegramId });
+      
+      // Set a timeout for the query
+      query.maxTimeMS(timeout);
+      
+      // Execute the query with timeout
+      return await query.exec();
+    } catch (error) {
+      console.error(`Error fetching copy trades for user ${telegramId}:`, error.message);
+      // Return empty array on error
+      return [];
+    }
   },
 
   /**
    * Get user's active copy trades
    * @param {string} telegramId - Telegram ID
+   * @param {number} timeout - Optional timeout in milliseconds
    * @returns {Promise<Array>} Array of active copy trade objects
    */
-  async getUserActiveCopyTrades(telegramId) {
-    return await CopyTrade.find({ telegramId, active: true });
+  async getUserActiveCopyTrades(telegramId, timeout = 5000) {
+    try {
+      // Create a query with timeout option
+      const query = CopyTrade.find({ telegramId, active: true });
+      
+      // Set a timeout for the query
+      query.maxTimeMS(timeout);
+      
+      // Execute the query with timeout
+      return await query.exec();
+    } catch (error) {
+      console.error(`Error fetching active copy trades for user ${telegramId}:`, error.message);
+      // Return empty array on error
+      return [];
+    }
   },
 
   /**
    * Get all active copy trades
+   * @param {number} timeout - Optional timeout in milliseconds
    * @returns {Promise<Array>} Array of active copy trade objects
    */
-  async getAllActiveCopyTrades() {
-    return await CopyTrade.find({ active: true });
+  async getAllActiveCopyTrades(timeout = 5000) {
+    try {
+      // Create a query with timeout option
+      const query = CopyTrade.find({ active: true });
+      
+      // Set a timeout for the query
+      query.maxTimeMS(timeout);
+      
+      // Execute the query with timeout
+      return await query.exec();
+    } catch (error) {
+      console.error(`Error fetching all active copy trades:`, error.message);
+      // Return empty array on error
+      return [];
+    }
   },
 
   /**
    * Get copy trades for a target wallet
    * @param {string} targetWallet - Target wallet address
+   * @param {number} timeout - Optional timeout in milliseconds
    * @returns {Promise<Array>} Array of copy trade objects
    */
-  async getCopyTradesByTarget(targetWallet) {
-    return await CopyTrade.find({ targetWallet, active: true });
+  async getCopyTradesByTarget(targetWallet, timeout = 5000) {
+    try {
+      // Create a query with timeout option
+      const query = CopyTrade.find({ targetWallet, active: true });
+      
+      // Set a timeout for the query
+      query.maxTimeMS(timeout);
+      
+      // Execute the query with timeout
+      return await query.exec();
+    } catch (error) {
+      console.error(`Error fetching copy trades for target wallet ${targetWallet}:`, error.message);
+      // Return empty array on error
+      return [];
+    }
   }
 };
 

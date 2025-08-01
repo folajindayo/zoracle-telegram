@@ -286,8 +286,8 @@ module.exports = (bot, users) => {
           break;
           
         case COPYTRADE_STATES.AWAITING_PIN:
-          // Verify PIN
-          if (text !== user.pin) {
+          // Verify PIN if it exists
+          if (user.pin && text !== user.pin) {
             bot.sendMessage(chatId, '❌ Incorrect PIN. Copy-trade setup cancelled.');
             copyTradeStates.delete(userId);
             return;
