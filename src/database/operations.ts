@@ -15,7 +15,10 @@ const UserOps = {
    * @returns {Promise<Object>} User object
    */
   async getUser(telegramId) {
-    return await User.findOne({ telegramId });
+    console.log(`🔍 Database: Getting user with Telegram ID: ${telegramId}`);
+    const user = await User.findOne({ telegramId });
+    console.log(`📊 Database: User found:`, user ? 'Yes' : 'No');
+    return user;
   },
 
   /**
@@ -25,8 +28,11 @@ const UserOps = {
    * @returns {Promise<Object>} User object
    */
   async upsertUser(telegramId, userData) {
+    console.log(`💾 Database: Upserting user with Telegram ID: ${telegramId}`);
     const options = { new: true, upsert: true, setDefaultsOnInsert: true };
-    return await User.findOneAndUpdate({ telegramId }, userData, options);
+    const result = await User.findOneAndUpdate({ telegramId }, userData, options);
+    console.log(`✅ Database: User upserted successfully`);
+    return result;
   },
 
   /**
@@ -113,8 +119,11 @@ const TransactionOps = {
    * @returns {Promise<Object>} Created transaction
    */
   async createTransaction(transactionData) {
+    console.log(`💾 Database: Creating transaction for user: ${transactionData.telegramId}`);
     const transaction = new Transaction(transactionData);
-    return await transaction.save();
+    const result = await transaction.save();
+    console.log(`✅ Database: Transaction created with ID: ${result._id}`);
+    return result;
   },
 
   /**

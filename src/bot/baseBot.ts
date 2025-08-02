@@ -65,6 +65,20 @@ axios.get(`https://api.telegram.org/bot${token}/deleteWebhook?drop_pending_updat
 // Use Ankr RPC for Base network
 const provider = new ethers.providers.JsonRpcProvider(process.env.PROVIDER_URL || 'https://rpc.ankr.com/base/b39a19f9ecf66252bf862fe6948021cd1586009ee97874655f46481cfbf3f129');
 
+// Set up bot menu commands
+bot.setMyCommands([
+  { command: 'start', description: '🚀 Start the bot' },
+  { command: 'help', description: '📚 Show help menu' },
+  { command: 'wallet', description: '🔐 Manage wallet' },
+  { command: 'portfolio', description: '💰 View portfolio' },
+  { command: 'trade', description: '🔄 Trading options' },
+  { command: 'sniper', description: '🎯 Token sniper' },
+  { command: 'history', description: '📊 Transaction history' },
+  { command: 'alerts', description: '🔔 Price alerts' },
+  { command: 'discover', description: '🔍 Discover tokens' },
+  { command: 'settings', description: '⚙️ Bot settings' }
+]);
+
 // Store user data and conversation states
 const users = new Map();
 const conversationStates = new Map(); // For onboarding wizard
@@ -83,41 +97,41 @@ Your Chat ID: `;
 const helpMessage = `
 📚 <b>Zoracle Bot Commands</b>
 
-<b>Wallet Management:</b>
-/wallet create - Create new wallet
-/wallet import &lt;private_key&gt; - Import wallet
-/unlock &lt;password&gt; [2FA] - Unlock wallet
-/enable2fa &lt;token&gt; - Enable 2FA
-/quickunlock &lt;pin&gt; - Quick unlock with PIN
+<b>🚀 Quick Start:</b>
+/start - Start the bot
+/help - Show this help menu
 
-<b>Trading:</b>
-/buy &lt;token&gt; &lt;amount|%&gt; - Buy token (e.g., /buy 0x... 10%)
-/sell &lt;token&gt; &lt;amount|%&gt; - Sell token
-/limit &lt;token&gt; &lt;amount&gt; &lt;price&gt; &lt;buy|sell&gt; - Set limit order
-/stoploss &lt;token&gt; &lt;amount&gt; &lt;price&gt; - Set stop-loss
-/takeprofit &lt;token&gt; &lt;amount&gt; &lt;price&gt; - Set take-profit
+<b>🔐 Wallet Management:</b>
+/wallet - Manage your wallet (create, import, unlock)
+/portfolio - View your portfolio and balances
+/history - View transaction history
 
-<b>Portfolio:</b>
-/portfolio [threshold] - View portfolio
-/token &lt;address&gt; - Token details (history, chart)
+<b>🔄 Trading Features:</b>
+/trade - Trading options (swap, buy, sell)
+/sniper - Set up token sniping bots
+/limit - Create limit orders
+/transfer - Send tokens to other wallets
 
-<b>Discovery:</b>
-/newcoins - New Zora coins (last 24h)
-/trending - Trending coins
-/search &lt;query&gt; - Search by title/creator
+<b>🔍 Discovery & Research:</b>
+/discover - Find new and trending tokens
+/search - Search for specific tokens
+/alerts - Set up price alerts
 
-<b>Alerts & Watchlists:</b>
-/alerts config &lt;price=5&gt; &lt;liquidity=10&gt; &lt;whale=1000&gt; - Configure thresholds
-/watchlist add &lt;token&gt; - Add to watchlist
-/watchlist remove &lt;token&gt; - Remove from watchlist
-/watchlist view - View watchlist
+<b>⚙️ Settings & Tools:</b>
+/settings - Configure bot preferences
+/help - Show this help menu
 
-<b>Copy-Trading:</b>
-/mirror &lt;wallet&gt; [slippage=2] - Mirror trades
-/mirror off - Stop mirroring
-/sandbox on - Enable testnet mode
+<b>💡 Pro Tips:</b>
+• Use the Menu button (📋) for quick access
+• Set up alerts to never miss opportunities
+• Use snipers for new token launches
+• Check portfolio regularly for updates
 
-/help - This menu
+<b>🎯 Popular Commands:</b>
+/trade - Start trading
+/sniper - Set up automated buying
+/portfolio - Check your holdings
+/discover - Find new opportunities
 `;
 
 // Onboarding wizard states
@@ -130,9 +144,25 @@ const STATES = {
 };
 
 // Handle /start
-bot.onText(/^\/start(?:\s+(.+))?$/, (msg, match) => {
+bot.onText(/^\/start(?:\s+(.+))?$/, async (msg, match) => {
   const chatId = msg.chat.id;
+  const userId = msg.from.id.toString();
   const walletAddress = match && match[1] ? match[1].trim() : null;
+  
+  // Import database operations
+  const { UserOps } = await import('../database/operations');
+  
+  // Store user data in database
+  try {
+    await UserOps.upsertUser(userId, {
+      telegramId: userId,
+      username: msg.from.username || msg.from.first_name,
+      lastActive: new Date()
+    });
+    console.log(`✅ User ${userId} saved to database`);
+  } catch (error) {
+    console.error(`❌ Failed to save user ${userId} to database:`, error);
+  }
 
   if (walletAddress) {
     // Validate and store wallet
@@ -334,8 +364,11 @@ function showMainMenu(chatId): any {
     reply_markup: {
       inline_keyboard: [
         [{ text: '💰 Portfolio', callback_data: 'show_portfolio' }, { text: '🔄 Trade', callback_data: 'show_trade_options' }],
+        [{ text: '🎯 Sniper', callback_data: 'sniper_new' }, { text: '💸 Transfer', callback_data: 'transfer' }],
+        [{ text: '⏱️ Limit Orders', callback_data: 'limit_new' }, { text: '👥 Copy Trading', callback_data: 'show_copy_trading' }],
+        [{ text: '📊 History', callback_data: 'show_transactions' }, { text: '🔔 Alerts', callback_data: 'show_alerts' }],
         [{ text: '🔍 Discover', callback_data: 'show_discover' }, { text: '⚙️ Settings', callback_data: 'show_settings' }],
-        [{ text: '🔔 Alerts', callback_data: 'show_alerts' }, { text: '👥 Copy Trading', callback_data: 'show_copy_trading' }]
+        [{ text: '🎁 Referrals', callback_data: 'show_referrals' }]
       ]
     },
     parse_mode: 'HTML' as const
@@ -396,40 +429,27 @@ bot.on('callback_query', async (callbackQuery) => {
         return;
       }
       
-      // Process the balance data
-      const balances = balanceResult.balances || {};
-      const tokens = Object.keys(balances);
-      
-      // Simple price mapping for estimation
-      const priceMapping = {
-        'ETH': 3000,
-        'WETH': 3000,
-        'USDC': 1,
-        'USDT': 1,
-        'ZORA': 2.5,
-        'DEFAULT': 1 // Default price for unknown tokens
-      };
-      
-      // Calculate total portfolio value and build message
-      let totalValue = 0;
+      // Process the balance data using the new API response format
+      const balances = balanceResult.data.balances || [];
+      const totalUsdValue = balanceResult.data.totalUsdValue || 0;
       let portfolioText = '💰 <b>Your Portfolio</b>\n\n';
       
-      if (tokens.length === 0) {
-        portfolioText += 'Total Value: N/A\n\n\nNo tokens found in your portfolio.';
-      } else {
-        // Build token list and calculate total value
-        let tokensList = '';
+      // Add total value header using API response
+      portfolioText += `Total Value: $${totalUsdValue.toFixed(2)}\n\n`;
+      portfolioText += 'Holdings:\n';
+      
+      // Process each token balance
+      for (const balance of balances) {
+        const token = balance.token;
+        const amount = balance.amount;
+        const usdValue = balance.usdValue || 0;
         
-        for (const symbol of tokens) {
-          const balance = parseFloat(balances[symbol]);
-          const price = priceMapping[symbol] || priceMapping.DEFAULT;
-          const value = balance * price;
-          
-          totalValue += value;
-          tokensList += `• ${symbol}: ${balances[symbol]} ($${value.toFixed(2)})\n`;
-        }
+        // Format balance and USD value
+        const formattedBalance = parseFloat(amount.formatted).toFixed(6);
+        const formattedUsdValue = usdValue.toFixed(2);
         
-        portfolioText += `Total Value: $${totalValue.toFixed(2)}\n\n<b>Holdings:</b>\n${tokensList}`;
+        // Add token to portfolio message
+        portfolioText += `• ${token.symbol}: ${formattedBalance} ($${formattedUsdValue})\n`;
       }
       
       const portfolioOptions = {
@@ -461,6 +481,7 @@ bot.on('callback_query', async (callbackQuery) => {
         inline_keyboard: [
           [{ text: '💵 Buy Tokens', callback_data: 'trade_buy' }],
           [{ text: '💸 Sell Tokens', callback_data: 'trade_sell' }],
+          [{ text: '🔄 Swap Tokens', callback_data: 'trade_swap' }],
           [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
         ]
       },
@@ -477,6 +498,224 @@ bot.on('callback_query', async (callbackQuery) => {
         force_reply: true
       }
     });
+  }
+  else if (action === 'trade_swap') {
+    try {
+      // Import the swaps service
+      const swapService = require('../services/swaps');
+      
+      // Show a loading message
+      const loadingMessage = await bot.sendMessage(chatId, '⏳ Loading available tokens...');
+      
+      // Get the common tokens for the base network
+      const tokensResult = await swapService.getTokenAddresses('base');
+      
+      // Delete the loading message
+      bot.deleteMessage(chatId, loadingMessage.message_id).catch(e => console.error('Error deleting loading message:', e));
+      
+      if (tokensResult.success && tokensResult.tokens) {
+        const tokens = tokensResult.tokens || {};
+        
+        // Create buttons for common tokens
+        const tokenButtons = [];
+        
+        // ETH is special
+        tokenButtons.push([{ text: '💠 ETH (Native)', callback_data: 'swap_from_ETH' }]);
+        
+        // Add other common tokens
+        if (typeof tokens === 'object' && tokens !== null) {
+          for (const [symbol, address] of Object.entries(tokens)) {
+            if (symbol !== 'ETH') { // Skip ETH as we added it separately
+              tokenButtons.push([{ text: `${symbol}`, callback_data: `swap_from_${symbol}` }]);
+            }
+          }
+        }
+        
+        // Add back button
+        tokenButtons.push([{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]);
+        
+        // Store user's tokens for the session
+        if (!users.has(chatId.toString())) {
+          users.set(chatId.toString(), {});
+        }
+        const userData = users.get(chatId.toString());
+        userData.availableTokens = tokens;
+        
+        bot.sendMessage(chatId, '🔄 <b>Swap Tokens</b>\n\nSelect a token to swap <b>from</b>:', {
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: tokenButtons
+          }
+        });
+      } else {
+        bot.sendMessage(chatId, `❌ Error loading tokens: ${tokensResult.message}`, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Try Again', callback_data: 'trade_swap' }],
+              [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+            ]
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Error initializing token swap:', error);
+      bot.sendMessage(chatId, `❌ Error initializing swap: ${error.message}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+          ]
+        }
+      });
+    }
+  }
+  else if (action.startsWith('swap_from_')) {
+    try {
+      // Extract the token symbol from the callback data
+      const fromToken = action.substring('swap_from_'.length);
+      
+      // Get user data
+      if (!users.has(chatId.toString())) {
+        users.set(chatId.toString(), {});
+      }
+      const userData = users.get(chatId.toString());
+      
+      // Store the fromToken for the session
+      userData.swapFromToken = fromToken;
+      
+      // Get available tokens with fallback
+      const tokens = userData.availableTokens || {
+        ETH: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE',
+        WETH: '0x4200000000000000000000000000000000000006',
+        USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        USDT: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA'
+      };
+      
+      // Create buttons for tokens to swap to
+      const tokenButtons = [];
+      
+      // Add ETH if from token isn't ETH
+      if (fromToken !== 'ETH') {
+        tokenButtons.push([{ text: '💠 ETH (Native)', callback_data: 'swap_to_ETH' }]);
+      }
+      
+      // Add other tokens except the from token
+      if (typeof tokens === 'object' && tokens !== null) {
+        for (const [symbol, address] of Object.entries(tokens)) {
+          if (symbol !== 'ETH' && symbol !== fromToken) {
+            tokenButtons.push([{ text: symbol, callback_data: `swap_to_${symbol}` }]);
+          }
+        }
+      }
+      
+      // Add custom token option for sniping
+      tokenButtons.push([{ text: '🎯 Custom Token (Snipe)', callback_data: 'swap_to_custom' }]);
+      
+      // Add back buttons
+      tokenButtons.push([
+        { text: '⬅️ Different Source', callback_data: 'trade_swap' },
+        { text: '🏠 Back to Trading', callback_data: 'show_trade_options' }
+      ]);
+      
+      bot.sendMessage(chatId, `🔄 <b>Swap Tokens</b>\n\nSwapping from <b>${fromToken}</b>\n\nSelect a token to swap <b>to</b>:`, {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: tokenButtons
+        }
+      });
+    } catch (error) {
+      console.error('Error selecting from token for swap:', error);
+      bot.sendMessage(chatId, `❌ Error selecting token: ${error.message}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+          ]
+        }
+      });
+    }
+  }
+  else if (action === 'swap_to_custom') {
+    try {
+      // Get user data
+      if (!users.has(chatId.toString())) {
+        users.set(chatId.toString(), {});
+      }
+      const userData = users.get(chatId.toString());
+      
+      // Get the from token
+      const fromToken = userData.swapFromToken;
+      
+      if (!fromToken) {
+        throw new Error('Source token not selected');
+      }
+      
+      // Set the conversation state for custom token input
+      conversationStates.set(chatId, 'AWAITING_CUSTOM_TOKEN');
+      
+      // Send message asking for custom token address
+      bot.sendMessage(chatId, `🎯 <b>Custom Token Snipe</b>\n\nSwapping from <b>${fromToken}</b> to custom token\n\nPlease enter the contract address of the token you want to snipe:\n\n<i>Example: 0x1234567890123456789012345678901234567890</i>`, {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '⬅️ Back to Token Selection', callback_data: 'trade_swap' }],
+            [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+          ]
+        }
+      });
+    } catch (error) {
+      console.error('Error selecting custom token for swap:', error);
+      bot.sendMessage(chatId, `❌ Error selecting token: ${error.message}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+          ]
+        }
+      });
+    }
+  }
+  else if (action.startsWith('swap_to_')) {
+    try {
+      // Extract the token symbol from the callback data
+      const toToken = action.substring('swap_to_'.length);
+      
+      // Get user data
+      if (!users.has(chatId.toString())) {
+        users.set(chatId.toString(), {});
+      }
+      const userData = users.get(chatId.toString());
+      
+      // Store the toToken for the session
+      userData.swapToToken = toToken;
+      
+      // Get the from token
+      const fromToken = userData.swapFromToken;
+      
+      if (!fromToken) {
+        throw new Error('Source token not selected');
+      }
+      
+      // Set the conversation state
+      conversationStates.set(chatId, 'AWAITING_SWAP_AMOUNT');
+      
+      // Get tokens data
+      const tokens = userData.availableTokens || {};
+      
+      // Send message asking for amount
+      bot.sendMessage(chatId, `🔄 <b>Swap Tokens</b>\n\nSwapping from <b>${fromToken}</b> to <b>${toToken}</b>\n\nPlease enter the amount of ${fromToken} you want to swap:`, {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          force_reply: true
+        }
+      });
+    } catch (error) {
+      console.error('Error selecting to token for swap:', error);
+      bot.sendMessage(chatId, `❌ Error selecting token: ${error.message}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+          ]
+        }
+      });
+    }
   }
   else if (action === 'trade_sell') {
     // Get user's tokens
@@ -579,6 +818,163 @@ bot.on('callback_query', async (callbackQuery) => {
       }
     });
     conversationStates.delete(chatId);
+  }
+  else if (action.startsWith('confirm_swap_')) {
+    // Handle swap confirmation
+    try {
+      // Import the walletManager and swaps service
+      const walletManager = require('../services/cdpWallet');
+      const swapService = require('../services/swaps');
+      
+      // Parse the callback data
+      // Format: confirm_swap_[slippage]
+      const parts = action.split('_');
+      const slippageBps = parseInt(parts[2]);
+      
+      // Get user data
+      if (!users.has(chatId.toString())) {
+        throw new Error('User session data not found');
+      }
+      const userData = users.get(chatId.toString());
+      
+      // Ensure we have all required data
+      if (!userData.swapFromToken || !userData.swapToToken || !userData.swapAmount || !userData.swapFromAmount) {
+        throw new Error('Missing swap parameters');
+      }
+      
+      // Check if wallet is unlocked
+      if (!walletManager.isWalletUnlocked(chatId.toString())) {
+        if (userData.pin) {
+          // Try to unlock with PIN
+          const unlockResult = await walletManager.quickUnlockWallet(chatId.toString(), userData.pin);
+          if (!unlockResult.success) {
+            bot.sendMessage(chatId, '❌ Your wallet is locked. Please use /wallet to unlock it first.');
+            return;
+          }
+        } else {
+          bot.sendMessage(chatId, '❌ Your wallet is locked. Please use /wallet to unlock it first.');
+          return;
+        }
+      }
+      
+      // Show executing message
+      const executingMsg = await bot.sendMessage(chatId, '⏳ Executing swap...');
+      
+      // Get account name for the swap API
+      const accountName = `zoracle-${chatId.toString()}`;
+      
+      // Execute the swap
+      const swapResult = await swapService.executeSwap(
+        accountName,
+        userData.swapFromToken,
+        userData.swapToToken,
+        userData.swapFromAmount,
+        slippageBps,
+        'base'
+      );
+      
+      // Delete the executing message
+      bot.deleteMessage(chatId, executingMsg.message_id).catch(e => {});
+      
+      if (swapResult.success) {
+        // Format the result message
+        let resultMsg = '✅ <b>Swap Executed Successfully!</b>\n\n';
+        resultMsg += `From: ${userData.swapAmount} ${userData.swapFromToken}\n`;
+        resultMsg += `To: ${swapResult.amountReceived} ${userData.swapToToken}\n`;
+        resultMsg += `Fee: ${ethers.utils.formatUnits(swapResult.feeAmount || '0')} ${userData.swapToToken} (5%)\n\n`;
+        
+        if (swapResult.transactionHash) {
+          resultMsg += `<a href="https://basescan.org/tx/${swapResult.transactionHash}">View on BaseScan</a>\n`;
+        }
+        
+        // Add buttons
+        const buttons = {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 New Swap', callback_data: 'trade_swap' }],
+              [{ text: '💰 View Portfolio', callback_data: 'show_portfolio' }],
+              [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+            ]
+          },
+          parse_mode: 'HTML' as const
+        };
+        
+        bot.sendMessage(chatId, resultMsg, buttons);
+        
+        // Clear swap data
+        delete userData.swapFromToken;
+        delete userData.swapToToken;
+        delete userData.swapAmount;
+        delete userData.swapFromAmount;
+        delete userData.swapEstimate;
+      } else {
+        bot.sendMessage(chatId, `❌ Swap failed: ${swapResult.message}`, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Try Again', callback_data: 'trade_swap' }],
+              [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+            ]
+          }
+        });
+      }
+      
+      // Clear conversation state
+      conversationStates.delete(chatId);
+    } catch (error) {
+      console.error('Error confirming swap:', error);
+      bot.sendMessage(chatId, `❌ Error confirming swap: ${error.message}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 Try Again', callback_data: 'trade_swap' }],
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        }
+      });
+      
+      // Clear conversation state
+      conversationStates.delete(chatId);
+    }
+  }
+  else if (action === 'cancel_swap') {
+    // Handle swap cancellation
+    try {
+      // Get user data
+      if (users.has(chatId.toString())) {
+        const userData = users.get(chatId.toString());
+        
+        // Clear swap data
+        delete userData.swapFromToken;
+        delete userData.swapToToken;
+        delete userData.swapAmount;
+        delete userData.swapFromAmount;
+        delete userData.swapEstimate;
+      }
+      
+      // Clear conversation state
+      conversationStates.delete(chatId);
+      
+      // Send confirmation and return to trade options
+      bot.sendMessage(chatId, '❌ Swap cancelled.');
+      
+      // Show trade options
+      const tradeOptions = {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💵 Buy Tokens', callback_data: 'trade_buy' }],
+            [{ text: '💸 Sell Tokens', callback_data: 'trade_sell' }],
+            [{ text: '🔄 Swap Tokens', callback_data: 'trade_swap' }],
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        },
+        parse_mode: 'HTML' as const
+      };
+      
+      bot.sendMessage(chatId, '🔄 <b>Trading</b>\n\nWhat would you like to do?', tradeOptions);
+    } catch (error) {
+      console.error('Error canceling swap:', error);
+      bot.sendMessage(chatId, `❌ Error: ${error.message}`);
+      showMainMenu(chatId);
+    }
   }
   else if (action === 'use_max_eth') {
     try {
@@ -1102,9 +1498,831 @@ bot.on('callback_query', async (callbackQuery) => {
       conversationStates.delete(chatId);
     }
   }
+  else if (action === 'show_transactions') {
+    try {
+      const userId = callbackQuery.from.id.toString();
+      
+      // Check if user has a wallet
+      const walletManager = require('../services/cdpWallet');
+      
+      if (!walletManager.userHasWallet(userId)) {
+        bot.sendMessage(chatId, '❌ You don\'t have a wallet set up yet. Please use /wallet to create one.');
+        return;
+      }
+      
+      // Get UseZoracle API wallet address
+      const address = await walletManager.getUseZoracleAddress(userId);
+      
+      if (!address) {
+        bot.sendMessage(chatId, '❌ Unable to get wallet address. Please make sure your wallet is unlocked.');
+        return;
+      }
+      
+      // Show loading message
+      const loadingMessage = await bot.sendMessage(chatId, 
+        `🔍 <b>Loading Transaction History</b>\n📝 <b>Wallet:</b> ${address}\n\nFetching your transactions from the blockchain...`, 
+        { parse_mode: 'HTML' as const }
+      );
+      
+      // Import blockchain explorer service
+      const { getTransactions } = require('../services/blockExplorer');
+      
+      // Get real transaction data
+      const txResult = await getTransactions(address, 5);
+      
+      // Check if we got data successfully
+      if (!txResult.success || !txResult.data || txResult.data.length === 0) {
+        bot.editMessageText(
+          `📜 <b>Transaction History</b>\n📝 <b>Wallet Address:</b> ${address}\n\nNo transactions found for this wallet address. This could be a new wallet or our explorer API might be experiencing issues.`,
+          {
+            chat_id: chatId,
+            message_id: loadingMessage.message_id,
+            parse_mode: 'HTML' as const,
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Refresh', callback_data: 'refresh_history' }],
+                [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+              ]
+            }
+          }
+        );
+        return;
+      }
+      
+      // Build transactions message
+      let txMessage = `📜 <b>Transaction History</b>\n`;
+      txMessage += `📝 <b>Wallet Address:</b> ${address}\n\n`;
+      
+      // Parse and display transactions
+      for (const tx of txResult.data) {
+        // Format the date
+        const date = new Date(tx.timestamp).toLocaleDateString();
+        const time = new Date(tx.timestamp).toLocaleTimeString();
+        
+        // Format transaction type
+        let typeIcon = '↔️';
+        let typeText = 'INTERACTION';
+        
+        if (tx.from && tx.to && tx.from.toLowerCase() === address.toLowerCase()) {
+          typeIcon = '📤';
+          typeText = 'SENT';
+        } else if (tx.to && tx.to.toLowerCase() === address.toLowerCase()) {
+          typeIcon = '📥';
+          typeText = 'RECEIVED';
+        }
+        
+        // Format the value
+        const valueText = tx.value ? `${tx.value.toFixed(6)} ETH` : '';
+        
+        // Transaction status
+        const statusIcon = tx.status === 'success' ? '✅' : '❌';
+        
+        // Build transaction line
+        txMessage += `${typeIcon} <b>${typeText}</b> ${statusIcon} - ${date} ${time}\n`;
+        if (valueText) {
+          txMessage += `Amount: ${valueText}\n`;
+        }
+        txMessage += `<a href="https://basescan.org/tx/${tx.txHash}">View on Basescan</a>\n\n`;
+      }
+      
+      // Add options to return to portfolio or main menu
+      const options = {
+        parse_mode: 'HTML' as const,
+        chat_id: chatId,
+        message_id: loadingMessage.message_id,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 Refresh', callback_data: 'refresh_history' }],
+            [{ text: '⬅️ Back to Portfolio', callback_data: 'show_portfolio' }],
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        }
+      };
+      
+      bot.editMessageText(txMessage, options);
+    } catch (error) {
+      console.error('Error displaying transaction history:', error);
+      bot.sendMessage(chatId, `❌ An error occurred while loading your transaction history: ${error.message}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        }
+      });
+    }
+  }
+  else if (action === 'transfer') {
+    // Call transfer command directly
+    const userId = callbackQuery.from.id.toString();
+    
+    // Use the transfer command implementation directly
+    bot.sendMessage(chatId, '💸 <b>Transfer Tokens</b>\n\nPlease enter the destination address:', {
+      parse_mode: 'HTML' as const,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '❌ Cancel', callback_data: 'back_to_main' }]
+        ]
+      }
+    });
+    
+    // Set state for transfer
+    conversationStates.set(chatId, 'AWAITING_TRANSFER_ADDRESS');
+  }
+  else if (action === 'show_settings') {
+    // Call settings command directly
+    const msg = { chat: { id: chatId }, from: callbackQuery.from, text: '/settings' } as any;
+    bot.sendMessage(chatId, '⚙️ <b>Bot Settings</b>\n\nConfigure your bot preferences:', {
+      parse_mode: 'HTML' as const,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔔 Notification Settings', callback_data: 'settings_notifications' }],
+          [{ text: '🌐 Language Settings', callback_data: 'settings_language' }],
+          [{ text: '🔄 Trading Defaults', callback_data: 'settings_trading' }],
+          [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+        ]
+      }
+    });
+  }
+  else if (action === 'show_referrals') {
+    // Call referrals command directly
+    const userId = callbackQuery.from.id.toString();
+    const referralLink = `https://t.me/ZoracleTradingBot?start=ref_${userId}`;
+    
+    bot.sendMessage(chatId, `🎁 <b>Referral Program</b>\n\nInvite friends to use Zoracle Bot and earn rewards!\n\nYour referral link:\n${referralLink}\n\nRewards:\n• 5% of fees from referred users\n• Special features unlocked at 5+ referrals`, {
+      parse_mode: 'HTML' as const,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📊 My Referrals', callback_data: 'show_my_referrals' }],
+          [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+        ]
+      }
+    });
+  }
+  else if (action === 'refresh_history') {
+    // Handle refresh history action by directly calling the same code as show_transactions
+    // but without emitting an event (to avoid TypeScript errors)
+    try {
+      const userId = callbackQuery.from.id.toString();
+      
+      // Check if user has a wallet
+      const walletManager = require('../services/cdpWallet');
+      
+      if (!walletManager.userHasWallet(userId)) {
+        bot.sendMessage(chatId, '❌ You don\'t have a wallet set up yet. Please use /wallet to create one.');
+        return;
+      }
+      
+      // Clear address cache to force fresh API call
+      walletManager.clearAddressCache(userId);
+      
+      // Get UseZoracle API wallet address
+      const address = await walletManager.getUseZoracleAddress(userId);
+      
+      if (!address) {
+        bot.sendMessage(chatId, '❌ Unable to get wallet address. Please make sure your wallet is unlocked.');
+        return;
+      }
+      
+      // Show loading message
+      const loadingMessage = await bot.sendMessage(chatId, 
+        `🔍 <b>Refreshing Transaction History</b>\n📝 <b>Wallet:</b> ${address}\n\nFetching your latest transactions from the blockchain...`, 
+        { parse_mode: 'HTML' as const }
+      );
+      
+      // Import blockchain explorer service
+      const { getTransactions } = require('../services/blockExplorer');
+      
+      // Get real transaction data (force refresh to bypass cache)
+      const txResult = await getTransactions(address, 5, true);
+      
+      // Check if we got data successfully
+      if (!txResult.success || !txResult.data || txResult.data.length === 0) {
+        bot.editMessageText(
+          `📜 <b>Transaction History</b>\n📝 <b>Wallet Address:</b> ${address}\n\nNo transactions found for this wallet address. This could be a new wallet or our explorer API might be experiencing issues.`,
+          {
+            chat_id: chatId,
+            message_id: loadingMessage.message_id,
+            parse_mode: 'HTML' as const,
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Refresh', callback_data: 'refresh_history' }],
+                [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+              ]
+            }
+          }
+        );
+        return;
+      }
+      
+      // Build transactions message
+      let txMessage = `📜 <b>Transaction History</b>\n`;
+      txMessage += `📝 <b>Wallet Address:</b> ${address}\n\n`;
+      
+      // Parse and display transactions
+      for (const tx of txResult.data) {
+        // Format the date
+        const date = new Date(tx.timestamp).toLocaleDateString();
+        const time = new Date(tx.timestamp).toLocaleTimeString();
+        
+        // Format transaction type
+        let typeIcon = '↔️';
+        let typeText = 'INTERACTION';
+        
+        if (tx.from && tx.to && tx.from.toLowerCase() === address.toLowerCase()) {
+          typeIcon = '📤';
+          typeText = 'SENT';
+        } else if (tx.to && tx.to.toLowerCase() === address.toLowerCase()) {
+          typeIcon = '📥';
+          typeText = 'RECEIVED';
+        }
+        
+        // Format the value
+        const valueText = tx.value ? `${tx.value.toFixed(6)} ETH` : '';
+        
+        // Transaction status
+        const statusIcon = tx.status === 'success' ? '✅' : '❌';
+        
+        // Build transaction line
+        txMessage += `${typeIcon} <b>${typeText}</b> ${statusIcon} - ${date} ${time}\n`;
+        if (valueText) {
+          txMessage += `Amount: ${valueText}\n`;
+        }
+        txMessage += `<a href="https://basescan.org/tx/${tx.txHash}">View on Basescan</a>\n\n`;
+      }
+      
+      // Add options to return to portfolio or main menu
+      const options = {
+        parse_mode: 'HTML' as const,
+        chat_id: chatId,
+        message_id: loadingMessage.message_id,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 Refresh', callback_data: 'refresh_history' }],
+            [{ text: '⬅️ Back to Portfolio', callback_data: 'show_portfolio' }],
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        }
+      };
+      
+      bot.editMessageText(txMessage, options);
+    } catch (error) {
+      console.error('Error refreshing transaction history:', error);
+      bot.sendMessage(chatId, `❌ An error occurred while refreshing your transaction history: ${error.message}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        }
+      });
+    }
+  }
+  else if (action === 'sniper_new') {
+    try {
+      // Check if user has a wallet
+      const walletManager = require('../services/cdpWallet');
+      const userId = callbackQuery.from.id.toString();
+      
+      if (!walletManager.userHasWallet(userId)) {
+        bot.sendMessage(chatId, '❌ You don\'t have a wallet set up yet. Please use /wallet to create one.');
+        return;
+      }
+      
+      // Check if wallet is unlocked
+      if (!walletManager.isWalletUnlocked(userId)) {
+        bot.sendMessage(chatId, '❌ Your wallet is locked. Please use /wallet to unlock it first.');
+        return;
+      }
+      
+      // Set conversation state for sniper setup
+      conversationStates.set(chatId, 'AWAITING_SNIPER_TOKEN');
+      
+      bot.sendMessage(chatId, '🎯 <b>New Sniper Bot</b>\n\nEnter the token contract address you want to snipe:\n\n<i>Example: 0x1234567890123456789012345678901234567890</i>', {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏠 Back to Sniper Menu', callback_data: 'sniper_menu' }],
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        }
+      });
+    } catch (error) {
+      console.error('Error setting up sniper:', error);
+      bot.sendMessage(chatId, `❌ Error setting up sniper: ${error.message}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        }
+      });
+    }
+  }
+  else if (action === 'sniper_list') {
+    try {
+      // Get user's active snipers
+      const userId = callbackQuery.from.id.toString();
+      
+      if (!users.has(userId)) {
+        users.set(userId, {});
+      }
+      const userData = users.get(userId);
+      const snipers = userData.snipers || [];
+      
+      if (snipers.length === 0) {
+        bot.sendMessage(chatId, '📋 <b>My Snipers</b>\n\nYou don\'t have any active sniper bots yet.', {
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '➕ New Sniper Bot', callback_data: 'sniper_new' }],
+              [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+            ]
+          }
+        });
+        return;
+      }
+      
+      // Build sniper list message
+      let message = '📋 <b>My Snipers</b>\n\n';
+      const buttons = [];
+      
+      snipers.forEach((sniper, index) => {
+        message += `${index + 1}. <b>${sniper.tokenSymbol || 'Unknown'}</b>\n`;
+        message += `   Address: <code>${sniper.tokenAddress}</code>\n`;
+        message += `   Status: ${sniper.active ? '🟢 Active' : '🔴 Inactive'}\n`;
+        message += `   Amount: ${sniper.amount} ETH\n\n`;
+        
+        buttons.push([
+          { text: `${sniper.active ? '⏸️ Pause' : '▶️ Resume'}`, callback_data: `sniper_toggle_${index}` },
+          { text: '🗑️ Delete', callback_data: `sniper_delete_${index}` }
+        ]);
+      });
+      
+      buttons.push([{ text: '➕ New Sniper Bot', callback_data: 'sniper_new' }]);
+      buttons.push([{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]);
+      
+      bot.sendMessage(chatId, message, {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: buttons
+        }
+      });
+    } catch (error) {
+      console.error('Error listing snipers:', error);
+      bot.sendMessage(chatId, `❌ Error loading snipers: ${error.message}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        }
+      });
+    }
+  }
+  else if (action === 'sniper_settings') {
+    try {
+      bot.sendMessage(chatId, '⚙️ <b>Sniper Settings</b>\n\nConfigure your sniper bot settings:', {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '⏱️ Slippage Tolerance', callback_data: 'sniper_slippage' }],
+            [{ text: '💰 Max Buy Amount', callback_data: 'sniper_max_amount' }],
+            [{ text: '⚡ Gas Settings', callback_data: 'sniper_gas' }],
+            [{ text: '🔔 Notifications', callback_data: 'sniper_notifications' }],
+            [{ text: '🏠 Back to Sniper Menu', callback_data: 'sniper_menu' }],
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        }
+      });
+    } catch (error) {
+      console.error('Error showing sniper settings:', error);
+      bot.sendMessage(chatId, `❌ Error loading settings: ${error.message}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        }
+      });
+    }
+  }
+  else if (action === 'sniper_menu') {
+    // Show the sniper menu (same as /sniper command)
+    bot.sendMessage(chatId, '🎯 <b>Token Sniper</b>\n\nQuickly buy new tokens as soon as they are available:', {
+      parse_mode: 'HTML' as const,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '➕ New Sniper Bot', callback_data: 'sniper_new' }],
+          [{ text: '📋 My Snipers', callback_data: 'sniper_list' }],
+          [{ text: '⚙️ Sniper Settings', callback_data: 'sniper_settings' }],
+          [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+        ]
+      }
+    });
+  }
   else if (action === 'back_to_main') {
     showMainMenu(chatId);
   }
+});
+
+// Add new menu commands
+// /config wallet command for wallet configuration
+bot.onText(/^\/config wallet$/, async (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, '⚙️ <b>Wallet Configuration</b>\n\nConfigure your wallet settings:', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🔐 Security Settings', callback_data: 'wallet_security' }],
+        [{ text: '💰 Default Gas Settings', callback_data: 'wallet_gas' }],
+        [{ text: '🔄 Network Settings', callback_data: 'wallet_network' }],
+        [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+      ]
+    }
+  });
+});
+
+// /positions command for viewing portfolio positions
+bot.onText(/^\/positions$/, async (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id.toString();
+  try {
+    // Get wallet manager
+    const walletManager = require('../services/cdpWallet');
+    
+    // Check if wallet is set up and unlocked
+    if (!walletManager.userHasWallet(userId)) {
+      bot.sendMessage(chatId, '❌ You need to set up a wallet first. Use /wallet to create one.');
+      return;
+    }
+    
+    // Get portfolio data
+    // For now, redirect to portfolio view
+    bot.sendMessage(chatId, '📊 <b>Your Positions</b>\n\nLoading your portfolio positions...', {
+      parse_mode: 'HTML' as const
+    });
+    
+    // Show portfolio directly instead of emit
+    try {
+      // Get wallet balances
+      const balanceResult = await walletManager.getWalletBalances(userId);
+      
+      if (!balanceResult.success) {
+        bot.sendMessage(chatId, `❌ Failed to load positions: ${balanceResult.message}`);
+        return;
+      }
+      
+      // Process the balance data
+      const balances = balanceResult.balances || {};
+      const tokens = Object.keys(balances);
+      const address = balanceResult.address; // Get wallet address
+      
+      // Simple price mapping for estimation
+      const priceMapping = {
+        'ETH': 3000,
+        'WETH': 3000,
+        'USDC': 1,
+        'USDT': 1,
+        'ZORA': 2.5,
+        'DEFAULT': 1 // Default price for unknown tokens
+      };
+      
+      // Calculate total portfolio value
+      let totalValue = 0;
+      let portfolioText = '📊 <b>Your Positions</b>\n\n';
+      portfolioText += `📝 <b>Wallet Address:</b> ${address}\n\n`;
+      
+      if (tokens.length === 0) {
+        portfolioText += 'Total Value: N/A\n\n\nNo tokens found in your portfolio.';
+      } else {
+        // Build token list and calculate total value
+        let tokensList = '';
+        
+        for (const symbol of tokens) {
+          const balance = parseFloat(balances[symbol]);
+          const price = priceMapping[symbol] || priceMapping.DEFAULT;
+          const value = balance * price;
+          
+          totalValue += value;
+          tokensList += `• ${symbol}: ${balances[symbol]} ($${value.toFixed(2)})\n`;
+        }
+        
+        portfolioText += `Total Value: $${totalValue.toFixed(2)}\n\n<b>Holdings:</b>\n${tokensList}`;
+      }
+      
+      const portfolioOptions = {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '📊 Transaction History', callback_data: 'show_transactions' }],
+            [{ text: '🔄 Refresh Portfolio', callback_data: 'refresh_portfolio' }],
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        },
+        parse_mode: 'HTML' as const
+      };
+      
+      bot.sendMessage(chatId, portfolioText, portfolioOptions);
+    } catch (error) {
+      console.error('Error displaying portfolio from positions:', error);
+      bot.sendMessage(chatId, `❌ An error occurred: ${error.message}`);
+    }
+  } catch (error) {
+    console.error('Error displaying positions:', error);
+    bot.sendMessage(chatId, '❌ Failed to load positions: ' + error.message);
+  }
+});
+
+// /sniper command for token sniping features
+bot.onText(/^\/sniper$/, async (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, '🎯 <b>Token Sniper</b>\n\nQuickly buy new tokens as soon as they are available:', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '➕ New Sniper Bot', callback_data: 'sniper_new' }],
+        [{ text: '📋 My Snipers', callback_data: 'sniper_list' }],
+        [{ text: '⚙️ Sniper Settings', callback_data: 'sniper_settings' }],
+        [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+      ]
+    }
+  });
+});
+
+// /trade command for trading options
+bot.onText(/^\/trade$/, async (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, '🔄 <b>Trading Options</b>\n\nChoose your trading method:', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🔄 Swap Tokens', callback_data: 'trade_swap' }],
+        [{ text: '💰 Buy Tokens', callback_data: 'trade_buy' }],
+        [{ text: '💸 Sell Tokens', callback_data: 'trade_sell' }],
+        [{ text: '⏱️ Limit Orders', callback_data: 'limit_new' }],
+        [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+      ]
+    }
+  });
+});
+
+// /discover command for token discovery
+bot.onText(/^\/discover$/, async (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, '🔍 <b>Discover Tokens</b>\n\nFind new and trending tokens:', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🆕 New Tokens', callback_data: 'discover_new' }],
+        [{ text: '📈 Trending Tokens', callback_data: 'discover_trending' }],
+        [{ text: '🔍 Search Tokens', callback_data: 'discover_search' }],
+        [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+      ]
+    }
+  });
+});
+
+// /alerts command for price alerts
+bot.onText(/^\/alerts$/, async (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, '🔔 <b>Price Alerts</b>\n\nManage your price alerts:', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '➕ New Alert', callback_data: 'alert_new' }],
+        [{ text: '📋 My Alerts', callback_data: 'alert_list' }],
+        [{ text: '⚙️ Alert Settings', callback_data: 'alert_settings' }],
+        [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+      ]
+    }
+  });
+});
+
+// /settings command for bot settings
+bot.onText(/^\/settings$/, async (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, '⚙️ <b>Bot Settings</b>\n\nConfigure your bot preferences:', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🔔 Notifications', callback_data: 'settings_notifications' }],
+        [{ text: '🌐 Language', callback_data: 'settings_language' }],
+        [{ text: '🔄 Trading Defaults', callback_data: 'settings_trading' }],
+        [{ text: '🔐 Security', callback_data: 'settings_security' }],
+        [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+      ]
+    }
+  });
+});
+
+// /copy trade command for copy trading features
+bot.onText(/^\/copy trade$/, async (msg) => {
+  const chatId = msg.chat.id;
+  
+  // Show copy trading menu directly
+  bot.sendMessage(chatId, '👥 <b>Copy Trading</b>\n\nAutomatically copy trades from successful traders:', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '➕ Add New Mirror', callback_data: 'add_mirror' }],
+        [{ text: '📋 My Active Mirrors', callback_data: 'list_mirrors' }],
+        [{ text: '⚙️ Mirror Settings', callback_data: 'mirror_settings' }],
+        [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+      ]
+    }
+  });
+});
+
+// /limit command for setting limit orders
+bot.onText(/^\/limit$/, async (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, '📊 <b>Limit Orders</b>\n\nCreate and manage limit orders:', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '➕ Create Limit Order', callback_data: 'limit_new' }],
+        [{ text: '📋 Active Limit Orders', callback_data: 'limit_active' }],
+        [{ text: '📜 Limit Order History', callback_data: 'limit_history' }],
+        [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+      ]
+    }
+  });
+});
+
+// /transfer command for token transfers
+bot.onText(/^\/transfer$/, async (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id.toString();
+  try {
+    // Get wallet manager
+    const walletManager = require('../services/cdpWallet');
+    
+    // Check if wallet is set up
+    if (!walletManager.userHasWallet(userId)) {
+      bot.sendMessage(chatId, '❌ You need to set up a wallet first. Use /wallet to create one.');
+      return;
+    }
+    
+    // Set conversation state for transfer
+    conversationStates.set(chatId, 'AWAITING_TRANSFER_ADDRESS');
+    
+    bot.sendMessage(chatId, '💸 <b>Transfer Tokens</b>\n\nPlease enter the destination address:', {
+      parse_mode: 'HTML' as const,
+      reply_markup: {
+        force_reply: true
+      }
+    });
+  } catch (error) {
+    console.error('Error starting transfer:', error);
+    bot.sendMessage(chatId, '❌ Failed to start transfer: ' + error.message);
+  }
+});
+
+// /history command for transaction history
+bot.onText(/^\/history$/, async (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id.toString();
+  
+  try {
+    // Get wallet manager
+    const walletManager = require('../services/cdpWallet');
+    
+    // Check if user has a wallet
+    if (!walletManager.userHasWallet(userId)) {
+      bot.sendMessage(chatId, '❌ You need to set up a wallet first. Use /wallet to create one.');
+      return;
+    }
+    
+    // Get UseZoracle API wallet address
+    const address = await walletManager.getUseZoracleAddress(userId);
+    
+    if (!address) {
+      bot.sendMessage(chatId, '❌ Unable to get wallet address. Please make sure your wallet is unlocked.');
+      return;
+    }
+    
+    // Show loading message
+    const loadingMessage = await bot.sendMessage(chatId, 
+      `🔍 <b>Loading Transaction History</b>\n📝 <b>Wallet:</b> ${address}\n\nFetching your transactions from the blockchain...`, 
+      { parse_mode: 'HTML' as const }
+    );
+    
+    // Import blockchain explorer service
+    const { getTransactions } = require('../services/blockExplorer');
+    
+    // Get real transaction data
+    const txResult = await getTransactions(address, 5);
+    
+    // Check if we got data successfully
+    if (!txResult.success || !txResult.data || txResult.data.length === 0) {
+      bot.editMessageText(
+        `📜 <b>Transaction History</b>\n📝 <b>Wallet Address:</b> ${address}\n\nNo transactions found for this wallet address. This could be a new wallet or our explorer API might be experiencing issues.`,
+        {
+          chat_id: chatId,
+          message_id: loadingMessage.message_id,
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Refresh', callback_data: 'refresh_history' }],
+              [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+            ]
+          }
+        }
+      );
+      return;
+    }
+    
+    // Build transactions message
+    let txMessage = `📜 <b>Transaction History</b>\n`;
+    txMessage += `📝 <b>Wallet Address:</b> ${address}\n\n`;
+    
+    // Parse and display transactions
+    for (const tx of txResult.data) {
+      // Format the date
+      const date = new Date(tx.timestamp).toLocaleDateString();
+      const time = new Date(tx.timestamp).toLocaleTimeString();
+      
+      // Format transaction type
+      let typeIcon = '↔️';
+      let typeText = 'INTERACTION';
+      
+      if (tx.from && tx.to && tx.from.toLowerCase() === address.toLowerCase()) {
+        typeIcon = '📤';
+        typeText = 'SENT';
+      } else if (tx.to && tx.to.toLowerCase() === address.toLowerCase()) {
+        typeIcon = '📥';
+        typeText = 'RECEIVED';
+      }
+      
+      // Format the value
+      const valueText = tx.value ? `${tx.value.toFixed(6)} ETH` : '';
+      
+      // Transaction status
+      const statusIcon = tx.status === 'success' ? '✅' : '❌';
+      
+      // Build transaction line
+      txMessage += `${typeIcon} <b>${typeText}</b> ${statusIcon} - ${date} ${time}\n`;
+      if (valueText) {
+        txMessage += `Amount: ${valueText}\n`;
+      }
+      txMessage += `<a href="https://basescan.org/tx/${tx.txHash}">View on Basescan</a>\n\n`;
+    }
+    
+    // Add options to return to portfolio or main menu
+    const options = {
+      parse_mode: 'HTML' as const,
+      chat_id: chatId,
+      message_id: loadingMessage.message_id,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔄 Refresh', callback_data: 'refresh_history' }],
+          [{ text: '⬅️ Back to Portfolio', callback_data: 'show_portfolio' }],
+          [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+        ]
+      }
+    };
+    
+    bot.editMessageText(txMessage, options);
+  } catch (error) {
+    console.error('Error displaying transaction history:', error);
+    bot.sendMessage(chatId, `❌ An error occurred while loading your transaction history: ${error.message}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+        ]
+      }
+    });
+  }
+});
+
+// /settings command for bot settings
+bot.onText(/^\/settings$/, async (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, '⚙️ <b>Bot Settings</b>\n\nConfigure your bot preferences:', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🔔 Notification Settings', callback_data: 'settings_notifications' }],
+        [{ text: '🌐 Language Settings', callback_data: 'settings_language' }],
+        [{ text: '🔄 Trading Defaults', callback_data: 'settings_trading' }],
+        [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+      ]
+    }
+  });
+});
+
+// /referrals command for referral program
+bot.onText(/^\/referrals$/, async (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id.toString();
+  
+  // Generate referral link with user ID
+  const referralLink = `https://t.me/ZoracleTradingBot?start=ref_${userId}`;
+  
+  bot.sendMessage(chatId, `🎁 <b>Referral Program</b>\n\nInvite friends to use Zoracle Bot and earn rewards!\n\nYour referral link:\n${referralLink}\n\nRewards:\n• 5% of fees from referred users\n• Special features unlocked at 5+ referrals`, {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '📊 My Referrals', callback_data: 'show_my_referrals' }],
+        [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+      ]
+    }
+  });
 });
 
 // Handle onboarding responses (state machine)
@@ -1789,6 +3007,404 @@ bot.on('message', async (msg) => {
         conversationStates.delete(chatId);
       }
       break;
+      
+    case 'AWAITING_SWAP_AMOUNT':
+      try {
+        // Get the amount input
+        const inputAmount = msg.text.trim();
+        
+        // Import the services we need
+        const swapService = require('../services/swaps');
+        const walletManager = require('../services/cdpWallet');
+        
+        // Check if wallet is unlocked
+        if (!walletManager.isWalletUnlocked(chatId.toString())) {
+          if (userData.pin) {
+            // Try to unlock with PIN
+            const unlockResult = await walletManager.quickUnlockWallet(chatId.toString(), userData.pin);
+            if (!unlockResult.success) {
+              bot.sendMessage(chatId, '❌ Your wallet is locked. Please use /wallet to unlock it first.');
+              return;
+            }
+          } else {
+            bot.sendMessage(chatId, '❌ Your wallet is locked. Please use /wallet to unlock it first.');
+            return;
+          }
+        }
+        
+        // Verify the input is a valid number
+        const amount = parseFloat(inputAmount);
+        if (isNaN(amount) || amount <= 0) {
+          bot.sendMessage(chatId, '❌ Invalid amount. Please enter a positive number.');
+          return;
+        }
+        
+        // Get the tokens from user data
+        const fromToken = userData.swapFromToken;
+        const toToken = userData.swapToToken;
+        
+        if (!fromToken || !toToken) {
+          throw new Error('Token selection data is missing');
+        }
+        
+        // Show loading message
+        const loadingMsg = await bot.sendMessage(chatId, '⏳ Getting price quote...');
+        
+        // Convert amount to base units for the API (e.g., Wei for ETH)
+        // For simplicity, assume 18 decimals (which is standard for most ERC-20 tokens)
+        const decimals = fromToken === 'ETH' ? 18 : 18; // Could be enhanced to get actual decimals
+        const amountInBaseUnits = ethers.utils.parseUnits(inputAmount, decimals).toString();
+        
+        // Store amount info for later use
+        userData.swapAmount = inputAmount;
+        userData.swapFromAmount = amountInBaseUnits;
+        
+        // Get account name for the API
+        const accountName = `zoracle-${chatId.toString()}`;
+        
+        // Get price quote
+        const priceQuote = await swapService.getSwapPrice(
+          accountName, 
+          fromToken, 
+          toToken, 
+          amountInBaseUnits,
+          'base'
+        );
+        
+        // Delete loading message
+        bot.deleteMessage(chatId, loadingMsg.message_id).catch(e => {});
+        
+        if (!priceQuote.success || !priceQuote.liquidityAvailable) {
+          throw new Error(priceQuote.message || 'Failed to get price quote. Liquidity might not be available for this swap.');
+        }
+        
+        // Store price quote for later use
+        userData.swapEstimate = priceQuote;
+        
+        // Build confirmation message
+        let confirmMsg = '🔄 <b>Swap Confirmation</b>\n\n';
+        confirmMsg += `From: ${inputAmount} ${fromToken}\n`;
+        confirmMsg += `To: ~${priceQuote.expectedOutputFormatted} ${toToken} (estimated)\n`;
+        confirmMsg += `Minimum received: ${priceQuote.minOutputFormatted} ${toToken}\n`;
+        confirmMsg += `Exchange rate: 1 ${fromToken} = ${priceQuote.exchangeRate} ${toToken}\n`;
+        confirmMsg += `Fee: ${ethers.utils.formatUnits(priceQuote.feeAmount || '0')} ${toToken} (5%)\n\n`;
+        confirmMsg += `Please select slippage tolerance:`;
+        
+        // Send confirmation message with slippage options
+        bot.sendMessage(chatId, confirmMsg, {
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '0.5%', callback_data: 'confirm_swap_50' },
+                { text: '1%', callback_data: 'confirm_swap_100' },
+                { text: '2%', callback_data: 'confirm_swap_200' }
+              ],
+              [
+                { text: '❌ Cancel Swap', callback_data: 'cancel_swap' }
+              ]
+            ]
+          }
+        });
+        
+        // Update conversation state
+        conversationStates.set(chatId, 'AWAITING_SWAP_CONFIRM');
+        
+      } catch (error) {
+        console.error('Error processing swap amount:', error);
+        bot.sendMessage(chatId, `❌ Error: ${error.message}`, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Try Again', callback_data: 'trade_swap' }],
+              [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+            ]
+          }
+        });
+        
+        // Clear conversation state
+        conversationStates.delete(chatId);
+      }
+      break;
+      
+    case 'AWAITING_CUSTOM_TOKEN':
+      try {
+        // Get the custom token address input
+        const customTokenAddress = msg.text.trim();
+        
+        // Import the services we need
+        const swapService = require('../services/swaps');
+        const walletManager = require('../services/cdpWallet');
+        
+        // Check if wallet is unlocked
+        if (!walletManager.isWalletUnlocked(chatId.toString())) {
+          if (userData.pin) {
+            // Try to unlock with PIN
+            const unlockResult = await walletManager.quickUnlockWallet(chatId.toString(), userData.pin);
+            if (!unlockResult.success) {
+              bot.sendMessage(chatId, '❌ Your wallet is locked. Please use /wallet to unlock it first.');
+              return;
+            }
+          } else {
+            bot.sendMessage(chatId, '❌ Your wallet is locked. Please use /wallet to unlock it first.');
+            return;
+          }
+        }
+        
+        // Import address validation utility
+        const { isValidEthereumAddress } = require('../utils/addressValidation');
+        
+        // Validate the token address format
+        if (!isValidEthereumAddress(customTokenAddress)) {
+          bot.sendMessage(chatId, '❌ <b>Invalid Token Address</b>\n\nPlease enter a valid Ethereum contract address.\n\n<i>Example: 0x1234567890123456789012345678901234567890</i>', {
+            parse_mode: 'HTML' as const,
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Try Again', callback_data: 'swap_to_custom' }],
+                [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+              ]
+            }
+          });
+          return;
+        }
+        
+        // Normalize the address to checksum format
+        let normalizedAddress;
+        try {
+          normalizedAddress = ethers.utils.getAddress(customTokenAddress);
+        } catch (error) {
+          bot.sendMessage(chatId, '❌ <b>Invalid Token Address Format</b>\n\nPlease enter a valid Ethereum contract address.', {
+            parse_mode: 'HTML' as const,
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Try Again', callback_data: 'swap_to_custom' }],
+                [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+              ]
+            }
+          });
+          return;
+        }
+        
+        // Store the custom token address for the session
+        userData.swapToToken = normalizedAddress;
+        
+        // Get the from token
+        const fromToken = userData.swapFromToken;
+        
+        if (!fromToken) {
+          throw new Error('Source token not selected');
+        }
+        
+        // Get real-time price for the custom token
+        const priceResult = await swapService.getTokenPrice(normalizedAddress, 'base');
+        
+        let priceInfo = '';
+        if (priceResult.success) {
+          if (priceResult.priceUsd) {
+            // Full price data available
+            const price = parseFloat(priceResult.priceUsd).toFixed(6);
+            const change24h = priceResult.priceChange24h ? parseFloat(priceResult.priceChange24h).toFixed(2) : 'N/A';
+            const volume24h = priceResult.volume24h ? `$${parseFloat(priceResult.volume24h).toLocaleString()}` : 'N/A';
+            
+            priceInfo = `\n💰 <b>Token Price Info:</b>\n`;
+            priceInfo += `Price: $${price}\n`;
+            priceInfo += `24h Change: ${change24h}%\n`;
+            priceInfo += `24h Volume: ${volume24h}\n`;
+          } else if (priceResult.tokenInfo) {
+            // Basic token info available
+            const { symbol, name, decimals } = priceResult.tokenInfo;
+            priceInfo = `\n📋 <b>Token Info:</b>\n`;
+            priceInfo += `Symbol: ${symbol}\n`;
+            priceInfo += `Name: ${name}\n`;
+            priceInfo += `Decimals: ${decimals}\n`;
+            priceInfo += `⚠️ <i>Price data not available</i>\n`;
+          }
+        } else {
+          priceInfo = `\n⚠️ <i>Unable to retrieve token information</i>\n`;
+        }
+        
+        // Set the conversation state for amount input
+        conversationStates.set(chatId, 'AWAITING_SWAP_AMOUNT');
+        
+        // Send message asking for amount with price info
+        bot.sendMessage(chatId, `🎯 <b>Custom Token Snipe</b>\n\nSwapping from <b>${fromToken}</b> to custom token\n\nToken Address: <code>${normalizedAddress}</code>${priceInfo}\n\nPlease enter the amount of ${fromToken} you want to swap:`, {
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '⬅️ Different Token', callback_data: 'swap_to_custom' }],
+              [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+            ]
+          }
+        });
+      } catch (error) {
+        console.error('Error processing custom token address:', error);
+        bot.sendMessage(chatId, `❌ Error processing token address: ${error.message}`, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Try Again', callback_data: 'swap_to_custom' }],
+              [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+            ]
+          }
+        });
+        conversationStates.delete(chatId);
+      }
+      break;
+      
+    case 'AWAITING_SNIPER_TOKEN':
+      try {
+        // Get the token address input
+        const tokenAddress = msg.text.trim();
+        
+        // Import address validation utility
+        const { isValidEthereumAddress } = require('../utils/addressValidation');
+        
+        // Validate the token address format
+        if (!isValidEthereumAddress(tokenAddress)) {
+          bot.sendMessage(chatId, '❌ <b>Invalid Token Address</b>\n\nPlease enter a valid Ethereum contract address.\n\n<i>Example: 0x1234567890123456789012345678901234567890</i>', {
+            parse_mode: 'HTML' as const,
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Try Again', callback_data: 'sniper_new' }],
+                [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+              ]
+            }
+          });
+          return;
+        }
+        
+        // Normalize the address to checksum format
+        let normalizedAddress;
+        try {
+          normalizedAddress = ethers.utils.getAddress(tokenAddress);
+        } catch (error) {
+          bot.sendMessage(chatId, '❌ <b>Invalid Token Address Format</b>\n\nPlease enter a valid Ethereum contract address.', {
+            parse_mode: 'HTML' as const,
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🔄 Try Again', callback_data: 'sniper_new' }],
+                [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+              ]
+            }
+          });
+          return;
+        }
+        
+        // Get token info using the swap service
+        const swapService = require('../services/swaps');
+        const tokenInfo = await swapService.getTokenPrice(normalizedAddress, 'base');
+        
+        // Store the token info for the sniper setup
+        if (!users.has(chatId.toString())) {
+          users.set(chatId.toString(), {});
+        }
+        const userData = users.get(chatId.toString());
+        userData.sniperSetup = {
+          tokenAddress: normalizedAddress,
+          tokenInfo: tokenInfo
+        };
+        
+        // Set conversation state for sniper amount
+        conversationStates.set(chatId, 'AWAITING_SNIPER_AMOUNT');
+        
+        let tokenDisplay = '';
+        if (tokenInfo.success && tokenInfo.tokenInfo) {
+          const { symbol, name } = tokenInfo.tokenInfo;
+          tokenDisplay = `\n📋 <b>Token Info:</b>\nSymbol: ${symbol}\nName: ${name}\nAddress: <code>${normalizedAddress}</code>`;
+        } else {
+          tokenDisplay = `\n📋 <b>Token Address:</b>\n<code>${normalizedAddress}</code>`;
+        }
+        
+        // Send message asking for sniper amount
+        bot.sendMessage(chatId, `🎯 <b>Sniper Bot Setup</b>\n\n${tokenDisplay}\n\nPlease enter the amount of ETH you want to use for sniping this token:`, {
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Different Token', callback_data: 'sniper_new' }],
+              [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+            ]
+          }
+        });
+      } catch (error) {
+        console.error('Error processing sniper token address:', error);
+        bot.sendMessage(chatId, `❌ Error processing token address: ${error.message}`, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Try Again', callback_data: 'sniper_new' }],
+              [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+            ]
+          }
+        });
+        conversationStates.delete(chatId);
+      }
+      break;
+      
+    case 'AWAITING_SNIPER_AMOUNT':
+      try {
+        // Get the amount input
+        const inputAmount = msg.text.trim();
+        
+        // Verify the input is a valid number
+        const amount = parseFloat(inputAmount);
+        if (isNaN(amount) || amount <= 0) {
+          bot.sendMessage(chatId, '❌ Invalid amount. Please enter a positive number.');
+          return;
+        }
+        
+        // Get user data and sniper setup
+        if (!users.has(chatId.toString())) {
+          throw new Error('User session data not found');
+        }
+        const userData = users.get(chatId.toString());
+        const sniperSetup = userData.sniperSetup;
+        
+        if (!sniperSetup) {
+          throw new Error('Sniper setup data not found');
+        }
+        
+        // Create the sniper bot
+        const newSniper = {
+          tokenAddress: sniperSetup.tokenAddress,
+          tokenSymbol: sniperSetup.tokenInfo?.tokenInfo?.symbol || 'UNKNOWN',
+          amount: amount,
+          active: true,
+          createdAt: new Date().toISOString()
+        };
+        
+        // Add to user's snipers
+        if (!userData.snipers) {
+          userData.snipers = [];
+        }
+        userData.snipers.push(newSniper);
+        
+        // Clear setup data
+        delete userData.sniperSetup;
+        
+        // Clear conversation state
+        conversationStates.delete(chatId);
+        
+        // Send confirmation message
+        bot.sendMessage(chatId, `✅ <b>Sniper Bot Created!</b>\n\nToken: ${newSniper.tokenSymbol}\nAddress: <code>${newSniper.tokenAddress}</code>\nAmount: ${amount} ETH\nStatus: 🟢 Active\n\nYour sniper bot is now monitoring for opportunities to buy this token.`, {
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '📋 View My Snipers', callback_data: 'sniper_list' }],
+              [{ text: '➕ Create Another Sniper', callback_data: 'sniper_new' }],
+              [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+            ]
+          }
+        });
+      } catch (error) {
+        console.error('Error processing sniper amount:', error);
+        bot.sendMessage(chatId, `❌ Error creating sniper bot: ${error.message}`, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Try Again', callback_data: 'sniper_new' }],
+              [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+            ]
+          }
+        });
+        conversationStates.delete(chatId);
+      }
+      break;
   }
 });
 
@@ -1827,10 +3443,58 @@ bot.onText(/^\/limit (\w+) (\d+) (\d+) (buy|sell)$/, async (msg, match) => {
 // Portfolio commands
 bot.onText(/^\/portfolio ?(\d+)?$/, async (msg, match) => {
   const chatId = msg.chat.id;
+  const userId = msg.from.id.toString();
   const threshold = match[1] ? parseInt(match[1], 10) : 0;
-  const data = await portfolio.getPortfolio(chatId.toString(), threshold);
-  // Format and send
-  bot.sendMessage(chatId, `Portfolio: Total $${data.totalUSD}`);
+  
+  // Import database operations
+  const { UserOps, TransactionOps } = await import('../database/operations');
+  
+  // Log portfolio access in database
+  try {
+    await UserOps.updateLastActive(userId);
+    console.log(`✅ User ${userId} portfolio access logged to database`);
+  } catch (error) {
+    console.error(`❌ Failed to log portfolio access for user ${userId}:`, error);
+  }
+  
+  try {
+    // Get wallet balances from UseZoracle API
+    const balanceResult = await walletManager.getWalletBalances(userId);
+    
+    if (!balanceResult.success) {
+      bot.sendMessage(chatId, `❌ Failed to load portfolio: ${balanceResult.message}`);
+      return;
+    }
+    
+    const balances = balanceResult.data.balances || [];
+    const totalUsdValue = balanceResult.data.totalUsdValue || 0;
+    let portfolioMessage = '💰 <b>Your Portfolio</b>\n\n';
+    
+    // Add total value header using API response
+    portfolioMessage += `Total Value: $${totalUsdValue.toFixed(2)}\n\n`;
+    portfolioMessage += 'Holdings:\n';
+    
+    // Process each token balance
+    for (const balance of balances) {
+      const token = balance.token;
+      const amount = balance.amount;
+      const usdValue = balance.usdValue || 0;
+      
+      // Format balance and USD value
+      const formattedBalance = parseFloat(amount.formatted).toFixed(6);
+      const formattedUsdValue = usdValue.toFixed(2);
+      
+      // Add token to portfolio message
+      portfolioMessage += `• ${token.symbol}: ${formattedBalance} ($${formattedUsdValue})\n`;
+    }
+    
+    // Send the formatted portfolio message
+    bot.sendMessage(chatId, portfolioMessage, { parse_mode: 'HTML' });
+    
+  } catch (error) {
+    console.error('❌ Error loading portfolio:', error);
+    bot.sendMessage(chatId, '❌ Failed to load portfolio. Please try again later.');
+  }
 });
 
 bot.onText(/^\/token (\w+)$/, async (msg, match) => {
@@ -1952,6 +3616,10 @@ function formatTokenAmount(amount: string, symbol: string): string {
   return `${amount} ${symbol}`;
 }
 
+function getWalletAddress(userId: string): string | null {
+  return walletManager.getWalletAddress(userId);
+}
+
 // Export for external use
 export {
   bot,
@@ -1962,5 +3630,6 @@ export {
   decryptData,
   encryptData,
   formatEth,
-  formatTokenAmount
+  formatTokenAmount,
+  getWalletAddress
 };

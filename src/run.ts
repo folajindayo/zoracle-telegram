@@ -8,13 +8,20 @@ import * as dotenvExpand from 'dotenv-expand';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-// Create a simplified version of the database init function for now
+// Import the real database initialization
+import { initialize } from './database/init';
+
 async function initializeDatabase() {
-  console.log('🔄 Using simplified database initialization...');
+  console.log('🔄 Initializing MongoDB database...');
   try {
-    // Basic initialization successful 
-    console.log('✅ Database initialized (simplified)');
-    return true;
+    const success = await initialize();
+    if (success) {
+      console.log('✅ Database initialized successfully');
+      return true;
+    } else {
+      console.error('❌ Database initialization failed');
+      return false;
+    }
   } catch (error) {
     console.error('❌ Error initializing database:', error);
     return false;

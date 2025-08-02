@@ -142,7 +142,11 @@ const CONFIG: Config & Record<string, any> = {
   DATABASE: {
     TYPE: process.env.DB_TYPE || 'memory', // 'memory', 'mongodb', 'dynamodb'
     URL: process.env.DB_URL || null,
-  }
+  },
+  
+  // Blockchain explorer (using Ankr API with your API key)
+  ANKR_API_ENABLED: true,
+  ANKR_API_KEY: 'b39a19f9ecf66252bf862fe6948021cd1586009ee97874655f46481cfbf3f129'
 };
 
 // ABIs

@@ -1,7 +1,7 @@
 /**
  * Portfolio Handlers for Zoracle Telegram Bot
  */
-import { getEthBalance, getTokenBalance, getTokenInfo  } from '../baseBot';
+import { getEthBalance, getTokenBalance, getTokenInfo, getWalletAddress  } from '../baseBot';
 import { CONFIG  } from '../../config';
 import { escapeMarkdown, escapeMarkdownPreserveFormat, markdownToHtml } from '../../utils/telegramUtils';
 
@@ -48,6 +48,7 @@ module.exports = (bot, users) => {
 
       const balances = balanceResult.balances || {};
       const tokens = Object.keys(balances);
+      const address = balanceResult.address; // Get the wallet address
       
       // Simple price mapping for estimation
       const priceMapping = {
@@ -62,9 +63,10 @@ module.exports = (bot, users) => {
       // Calculate total portfolio value
       let totalValue = 0;
       
-      // Build portfolio message
-      let portfolioMessage = `
+        // Build portfolio message
+  let portfolioMessage = `
 💼 <b>Your Portfolio</b>
+📝 <b>Wallet Address:</b> ${address}
 `;
 
       if (tokens.length === 0) {
@@ -145,8 +147,12 @@ Use /pnl to calculate your profit/loss.
       userTransactions.push(...mockTxs);
     }
     
+    // Get wallet address
+    const address = getWalletAddress(userId);
+    
     // Build transactions message
-    let txMessage = '📜 <b>Transaction History</b>\n\n';
+    let txMessage = '📜 <b>Transaction History</b>\n';
+    txMessage += `📝 <b>Wallet Address:</b> ${address}\n\n`;
     
     for (const tx of userTransactions) {
       const date = new Date(tx.timestamp).toLocaleDateString();
@@ -186,9 +192,13 @@ Use /pnl to calculate your profit/loss.
       percentChange: 21.43 // 21.43% increase
     };
     
+    // Get wallet address
+    const address = getWalletAddress(userId);
+    
     // Build PnL message
     let pnlMessage = `
 📊 <b>Profit & Loss</b>
+📝 <b>Wallet Address:</b> ${address}
 
 Total Invested: $${pnlData.totalInvested.toFixed(2)}
 Current Value: $${pnlData.currentValue.toFixed(2)}

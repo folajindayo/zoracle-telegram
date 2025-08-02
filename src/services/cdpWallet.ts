@@ -34,6 +34,23 @@ const walletSessions = new Map();
 // Failed PIN attempt tracking
 const failedAttempts = new Map();
 
+// Cache for UseZoracle addresses to avoid hitting rate limits
+const addressCache = new Map();
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Clear address cache for a specific user
+ * @param {string} userId - Telegram user ID
+ */
+function clearAddressCache(userId: string): void {
+  const session = walletSessions.get(userId);
+  if (session && session.accountName) {
+    const cacheKey = `address_${session.accountName}`;
+    addressCache.delete(cacheKey);
+    console.log(`Cleared address cache for user ${userId}`);
+  }
+}
+
 /**
  * Create a new CDP wallet for a user
  * @param {string} userId - Telegram user ID
@@ -64,7 +81,7 @@ async function createWallet(userId, password, pin): Promise<any> {
           name: accountName
         });
         
-        console.log('UseZoracle API Response:', response.data);
+        console.log('UseZoracle API Response:', JSON.stringify(response.data, null, 2));
         
         if (!response.data || !response.data.success || !response.data.data) {
           throw new Error('Failed to create wallet: API call unsuccessful');
@@ -281,6 +298,96 @@ function getWalletAddress(userId): string | null {
 }
 
 /**
+ * Get UseZoracle API wallet address for a user
+ * @param {string} userId - Telegram user ID
+ * @returns {Promise<string|null>} - UseZoracle API wallet address or null if not found
+ */
+async function getUseZoracleAddress(userId): Promise<string | null> {
+  try {
+    // Check if wallet is unlocked
+    if (!isWalletUnlocked(userId)) {
+      return null;
+    }
+    
+    const session = walletSessions.get(userId);
+    if (!session || !session.accountName) {
+      return null;
+    }
+    
+    if (SIMULATION_MODE) {
+      // Return local wallet address in simulation mode
+      return getWalletAddress(userId);
+    } else {
+      // Check cache first to avoid hitting rate limits
+      const cacheKey = `address_${session.accountName}`;
+      const cachedData = addressCache.get(cacheKey);
+      if (cachedData && (Date.now() - cachedData.timestamp) < CACHE_DURATION) {
+        console.log(`Using cached address for ${session.accountName}: ${cachedData.address}`);
+        return cachedData.address;
+      }
+      
+      // Use real UseZoracle API to get the account details
+      try {
+        console.log(`Getting UseZoracle API account details for: ${session.accountName}`);
+        
+        const response = await axios.get(`${API_BASE_URL}/api/accounts/${session.accountName}`, {
+          timeout: 10000, // 10 second timeout
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (!response.data || !response.data.success || !response.data.data) {
+          throw new Error('Failed to get account details from UseZoracle API');
+        }
+        
+        const address = response.data.data.address;
+        console.log(`Retrieved wallet address from API: ${address}`);
+        
+        // Cache the result
+        addressCache.set(cacheKey, {
+          address,
+          timestamp: Date.now()
+        });
+        
+        return address;
+        
+      } catch (apiError) {
+        console.error('UseZoracle API Error:', apiError.message);
+        
+        // Handle rate limiting specifically
+        if (apiError.response && apiError.response.status === 429) {
+          console.error('Rate limit exceeded. Please try again later.');
+          // For rate limiting, we'll fall back to local address
+          const localAddress = getWalletAddress(userId);
+          if (localAddress) {
+            console.log(`Rate limited - falling back to local wallet address: ${localAddress}`);
+            return localAddress;
+          }
+          return null;
+        }
+        
+        if (apiError.response) {
+          console.error('API Response:', apiError.response.data);
+        }
+        
+        // Fallback to local wallet address if API fails
+        const localAddress = getWalletAddress(userId);
+        if (localAddress) {
+          console.log(`Falling back to local wallet address: ${localAddress}`);
+          return localAddress;
+        }
+        
+        return null;
+      }
+    }
+  } catch (error) {
+    console.error('Error getting UseZoracle address:', error);
+    return null;
+  }
+}
+
+/**
  * Quick unlock wallet with PIN
  * @param {string} userId - Telegram user ID
  * @param {string} pin - User's PIN
@@ -487,15 +594,23 @@ async function getWalletBalances(userId): Promise<any> {
           throw new Error('Failed to get balances from UseZoracle API');
         }
         
-        console.log('UseZoracle API Response:', response.data);
+        console.log('UseZoracle API Response:', JSON.stringify(response.data, null, 2));
+        
+        // Extract and format balances correctly
+        const formattedBalances = {};
+        
+        if (Array.isArray(response.data.data.balances)) {
+          response.data.data.balances.forEach(item => {
+            if (item.token && item.token.symbol) {
+              formattedBalances[item.token.symbol] = item.amount.formatted;
+            }
+          });
+        }
         
         return {
           success: true,
           address,
-          balances: response.data.data.balances.reduce((acc, token) => {
-            acc[token.symbol] = token.formattedBalance;
-            return acc;
-          }, {})
+          balances: formattedBalances
         };
       } catch (apiError) {
         console.error('UseZoracle API Error:', apiError.message);
@@ -577,11 +692,12 @@ async function getTokenBalance(userId, tokenAddress): Promise<any> {
           throw new Error('Failed to get token info from UseZoracle API');
         }
         
-        console.log('UseZoracle API Response:', response.data);
+        console.log('UseZoracle API Response:', JSON.stringify(response.data, null, 2));
         
         // Format response for consistency with our interface
-        const tokenData = response.data.data.balances.find(token => 
-          token.token && token.token.toLowerCase() === tokenAddress.toLowerCase()
+        const tokenData = response.data.data.balances.find(item => 
+          item.token && item.token.contractAddress && 
+          item.token.contractAddress.toLowerCase() === tokenAddress.toLowerCase()
         );
         
         if (!tokenData) {
@@ -602,9 +718,9 @@ async function getTokenBalance(userId, tokenAddress): Promise<any> {
           address,
           token: {
             address: tokenAddress,
-            symbol: tokenData.symbol || 'UNKNOWN',
-            balance: tokenData.balance || '0',
-            decimals: tokenData.decimals || 18
+            symbol: tokenData.token.symbol || 'UNKNOWN',
+            balance: tokenData.amount.formatted || '0',
+            decimals: tokenData.token.decimals || 18
           }
         };
       } catch (apiError) {
@@ -905,6 +1021,8 @@ export {
   userHasWallet,
   getWallet,
   getWalletAddress,
+  getUseZoracleAddress,
+  clearAddressCache,
   getWalletBalances,
   getTokenBalance,
   transferTokens,

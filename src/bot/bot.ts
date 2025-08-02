@@ -41,19 +41,25 @@ bot.onText(/\/help/, (msg) => {
 /start - Start the bot and get a welcome message.
 /help - Display this help message.
 /wallet - Manage your wallet (create, import, view balance).
+/config wallet - Configure wallet settings and security.
 /balance - Check your ETH and token balances.
+/positions - View your current portfolio positions.
 /buy <token_address> <amount> - Buy tokens with ETH.
 /sell <token_address> <amount> - Sell tokens for ETH.
+/sniper - Set up token sniping bots.
+/copy trade - Mirror trades from other wallets.
+/limit - Create and manage limit orders.
+/transfer - Send tokens to another wallet.
 /portfolio - View your token portfolio.
+/history - View your transaction history.
 /transactions - View your transaction history.
 /pnl - Calculate profit/loss for your holdings.
 /search <query> - Search for tokens.
 /trending - Show trending tokens.
 /new - Show newly created tokens.
 /alerts - Manage your price alerts.
-/addalert <token_address> - Add a price alert.
-/mirror <wallet_address> - Mirror another wallet's trades.
-/mirrors - List active mirrors.
+/settings - Configure bot preferences.
+/referrals - View and share your referral link.
 `;
   bot.sendMessage(chatId, helpMessage, { parse_mode: 'HTML' });
 });
