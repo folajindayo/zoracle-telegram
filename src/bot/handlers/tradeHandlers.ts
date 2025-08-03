@@ -1,335 +1,362 @@
 /**
  * Trade Handlers for Zoracle Telegram Bot
  */
-import { ethers  } from 'ethers';
-import { getEthBalance, getTokenBalance, getTokenInfo, decryptData  } from '../baseBot';
-import { CONFIG, ABIS  } from '../../config';
-import { buyTokensWithEth, sellTokensForEth, getTokenPrice, splitBuyOrder, splitSellOrder  } from '../../services/trading';
-import { UserOps, TransactionOps  } from '../../database/operations';
+import TelegramBot from 'node-telegram-bot-api';
+import { ethers } from 'ethers';
+import { UserData } from './walletHandlers';
+import { getTranslatedMessage } from './walletHandlers';
 
-// Trading states
-const TRADE_STATES = {
-  AWAITING_AMOUNT: 1,
-  CONFIRMING_TRADE: 2
-};
+export async function handleShowTradeOptions(
+  bot: TelegramBot,
+  chatId: number,
+  callbackQuery: any
+): Promise<void> {
+  try {
+    const userId = callbackQuery.from.id.toString();
+    const tradingTitle = await getTranslatedMessage('trading_title', userId);
+    const tradingSubtitle = await getTranslatedMessage('trading_subtitle', userId);
+    const buyTokens = await getTranslatedMessage('buy_tokens', userId);
+    const sellTokens = await getTranslatedMessage('sell_tokens', userId);
+    const swapTokens = await getTranslatedMessage('swap_tokens', userId);
+    const backToMain = await getTranslatedMessage('back_to_main', userId);
+    
+    const tradeOptions = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: buyTokens, callback_data: 'trade_buy' }],
+          [{ text: sellTokens, callback_data: 'trade_sell' }],
+          [{ text: swapTokens, callback_data: 'trade_swap' }],
+          [{ text: backToMain, callback_data: 'back_to_main' }]
+        ]
+      },
+      parse_mode: 'HTML' as const
+    };
+    
+    bot.sendMessage(chatId, `${tradingTitle}\n\n${tradingSubtitle}`, tradeOptions);
+  } catch (error) {
+    console.error('Error showing trade options:', error);
+    // Fallback to English
+    const tradeOptions = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '💵 Buy Tokens', callback_data: 'trade_buy' }],
+          [{ text: '💸 Sell Tokens', callback_data: 'trade_sell' }],
+          [{ text: '🔄 Swap Tokens', callback_data: 'trade_swap' }],
+          [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+        ]
+      },
+      parse_mode: 'HTML' as const
+    };
+    
+    bot.sendMessage(chatId, '🔄 <b>Trading</b>\n\nWhat would you like to do?', tradeOptions);
+  }
+}
 
-// In-memory trade state storage
-const tradeStates = new Map();
-
-module.exports = (bot, users) => {
-  // Buy command
-  bot.onText(/\/buy (.+)/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id.toString();
-    const tokenAddress = match[1].trim();
-    
-    // Check if user has a wallet
-    const user = users.get(userId);
-    
-    if (!user || !user.wallet) {
-      bot.sendMessage(chatId, 'You don\'t have a wallet set up yet. Use /wallet to set up a wallet.');
-      return;
-    }
-    
-    // Validate token address
-    if (!ethers.utils.isAddress(tokenAddress)) {
-      bot.sendMessage(chatId, '❌ Invalid token address. Please provide a valid Ethereum address.');
-      return;
-    }
-    
-    try {
-      // Get token info
-      const tokenInfo = await getTokenInfo(tokenAddress);
-      
-      // Get token price
-      const priceQuote = await getTokenPrice(tokenAddress);
-      
-      // Store trade state
-      tradeStates.set(userId, {
-        state: TRADE_STATES.AWAITING_AMOUNT,
-        action: 'buy',
-        tokenAddress,
-        tokenInfo,
-        priceQuote
-      });
-      
-      // Get user's ETH balance
-      const ethBalance = await getEthBalance(user.wallet.address);
-      
-      bot.sendMessage(chatId, 
-        `You're buying ${tokenInfo.name} (${tokenInfo.symbol})\n\n` +
-        `Current price: 1 ${tokenInfo.symbol} = ${priceQuote.price} ETH\n\n` +
-        `Your ETH balance: ${ethBalance} ETH\n\n` +
-        'How much ETH would you like to spend?'
-      );
-    } catch (error) {
-      bot.sendMessage(chatId, `❌ Error: ${error.message}`);
+export async function handleTradeBuy(
+  bot: TelegramBot,
+  chatId: number,
+  conversationStates: Map<number, any>
+): Promise<void> {
+  conversationStates.set(chatId, 'AWAITING_BUY_TOKEN');
+  bot.sendMessage(chatId, '💵 <b>Buy Tokens</b>\n\nPlease enter the token address you want to buy:', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      force_reply: true
     }
   });
-  
-  // Sell command
-  bot.onText(/\/sell (.+)/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id.toString();
-    const tokenAddress = match[1].trim();
+}
+
+export async function handleTradeSwap(
+  bot: TelegramBot,
+  chatId: number,
+  users: Map<string, UserData>
+): Promise<void> {
+  try {
+    // Import the swaps service
+    const swapService = await import('../../services/swaps');
     
-    // Check if user has a wallet
-    const user = users.get(userId);
+    // Show a loading message
+    const loadingMessage = await bot.sendMessage(chatId, '⏳ Loading available tokens...');
     
-    if (!user || !user.wallet) {
-      bot.sendMessage(chatId, 'You don\'t have a wallet set up yet. Use /wallet to set up a wallet.');
-      return;
-    }
+    // Get the common tokens for the base network
+    const tokensResult = await swapService.getTokenAddresses('base');
     
-    // Validate token address
-    if (!ethers.utils.isAddress(tokenAddress)) {
-      bot.sendMessage(chatId, '❌ Invalid token address. Please provide a valid Ethereum address.');
-      return;
-    }
+    // Delete the loading message
+    bot.deleteMessage(chatId, loadingMessage.message_id).catch(e => console.error('Error deleting loading message:', e));
     
-    try {
-      // Get token info
-      const tokenInfo = await getTokenInfo(tokenAddress);
+    if (tokensResult.success && tokensResult.tokens) {
+      const tokens = tokensResult.tokens || {};
       
-      // Get token balance
-      const tokenBalance = await getTokenBalance(tokenAddress, user.wallet.address);
+      // Create buttons for common tokens
+      const tokenButtons = [];
       
-      // Check if user has tokens to sell
-      if (parseFloat(tokenBalance) <= 0) {
-        bot.sendMessage(chatId, `❌ You don't have any ${tokenInfo.symbol} tokens to sell.`);
-        return;
-      }
+      // ETH is special
+      tokenButtons.push([{ text: '💠 ETH (Native)', callback_data: 'swap_from_ETH' }]);
       
-      // Get token price
-      const priceQuote = await getTokenPrice(tokenAddress);
-      
-      // Store trade state
-      tradeStates.set(userId, {
-        state: TRADE_STATES.AWAITING_AMOUNT,
-        action: 'sell',
-        tokenAddress,
-        tokenInfo,
-        tokenBalance,
-        priceQuote
-      });
-      
-      bot.sendMessage(chatId, 
-        `You're selling ${tokenInfo.name} (${tokenInfo.symbol})\n\n` +
-        `Current price: 1 ${tokenInfo.symbol} = ${priceQuote.price} ETH\n\n` +
-        `Your balance: ${tokenBalance} ${tokenInfo.symbol}\n\n` +
-        'How many tokens would you like to sell? (You can also type "max" to sell all)'
-      );
-    } catch (error) {
-      bot.sendMessage(chatId, `❌ Error: ${error.message}`);
-    }
-  });
-  
-  // Handle trade amount input
-  bot.on('message', async (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id.toString();
-    const text = msg.text;
-    
-    // Check if we're in a trade flow
-    const tradeState = tradeStates.get(userId);
-    
-    if (!tradeState) return;
-    
-    // Get user
-    const user = users.get(userId);
-    
-    if (!user || !user.wallet) {
-      bot.sendMessage(chatId, 'You don\'t have a wallet set up yet. Use /wallet to set up a wallet.');
-      tradeStates.delete(userId);
-      return;
-    }
-    
-    if (tradeState.state === TRADE_STATES.AWAITING_AMOUNT) {
-      try {
-        let amount;
-        
-        if (tradeState.action === 'buy') {
-          // Parse ETH amount for buying
-          if (text.toLowerCase() === 'max') {
-            // Use all available ETH (minus some for gas)
-            const ethBalance = await getEthBalance(user.wallet.address);
-            amount = parseFloat(ethBalance) * 0.95; // Leave 5% for gas
-          } else {
-            amount = parseFloat(text);
-          }
-          
-          // Validate amount
-          if (isNaN(amount) || amount <= 0) {
-            bot.sendMessage(chatId, '❌ Please enter a valid amount.');
-            return;
-          }
-          
-          // Check if user has enough ETH
-          const ethBalance = await getEthBalance(user.wallet.address);
-          
-          if (amount > parseFloat(ethBalance)) {
-            bot.sendMessage(chatId, `❌ You don't have enough ETH. Your balance is ${ethBalance} ETH.`);
-            tradeStates.delete(userId);
-            return;
-          }
-          
-          // Estimate token amount
-          const estimatedTokens = amount / parseFloat(tradeState.priceQuote.price);
-          
-          // Update trade state with estimated amount
-          tradeStates.set(userId, {
-            ...tradeState,
-            state: TRADE_STATES.CONFIRMING_TRADE,
-            amount,
-            estimatedTokens
-          });
-          
-          // Ask for confirmation with estimated amount
-          bot.sendMessage(chatId, 
-            `You are about to buy approximately ${estimatedTokens.toFixed(6)} ${tradeState.tokenInfo.symbol} ` +
-            `with ${amount} ETH.\n\n` +
-            'Note: Actual amount may vary due to price impact and slippage.\n\n' +
-            'Please enter your PIN to confirm:'
-          );
-          
-        } else if (tradeState.action === 'sell') {
-          // Parse token amount for selling
-          if (text.toLowerCase() === 'max') {
-            amount = parseFloat(tradeState.tokenBalance);
-          } else {
-            amount = parseFloat(text);
-          }
-          
-          // Validate amount
-          if (isNaN(amount) || amount <= 0) {
-            bot.sendMessage(chatId, '❌ Please enter a valid amount.');
-            return;
-          }
-          
-          // Check if user has enough tokens
-          if (amount > parseFloat(tradeState.tokenBalance)) {
-            bot.sendMessage(chatId, `❌ You don't have enough tokens. Your balance is ${tradeState.tokenBalance} ${tradeState.tokenInfo.symbol}.`);
-            tradeStates.delete(userId);
-            return;
-          }
-          
-          // Estimate ETH amount
-          const estimatedEth = amount * parseFloat(tradeState.priceQuote.price);
-          
-          // Update trade state
-          tradeStates.set(userId, {
-            ...tradeState,
-            state: TRADE_STATES.CONFIRMING_TRADE,
-            amount,
-            estimatedEth
-          });
-          
-          // Ask for confirmation with estimated amount
-          bot.sendMessage(chatId, 
-            `You are about to sell ${amount} ${tradeState.tokenInfo.symbol} ` +
-            `for approximately ${estimatedEth.toFixed(6)} ETH.\n\n` +
-            'Note: Actual amount may vary due to price impact and slippage.\n\n' +
-            'Please enter your PIN to confirm:'
-          );
-        }
-      } catch (error) {
-        bot.sendMessage(chatId, `❌ Error: ${error.message}`);
-        tradeStates.delete(userId);
-      }
-    } else if (tradeState.state === TRADE_STATES.CONFIRMING_TRADE) {
-      // Verify PIN
-      if (text !== user.pin) {
-        bot.sendMessage(chatId, '❌ Incorrect PIN. Trade cancelled.');
-        tradeStates.delete(userId);
-        return;
-      }
-      
-      try {
-        // Execute trade
-        bot.sendMessage(chatId, '⏳ Processing your trade...');
-        
-        // Decrypt private key
-        const privateKey = decryptData(user.wallet.encryptedPrivateKey, user.password || "");
-        
-        // Execute trade based on action
-        if (tradeState.action === 'buy') {
-          // Check if MEV protection should be applied
-          let result;
-          if (CONFIG.MEV_PROTECTION.ENABLED && parseFloat(tradeState.amount) > parseFloat(CONFIG.MEV_PROTECTION.THRESHOLD)) {
-            // Use order splitting for MEV protection
-            result = await splitBuyOrder(
-              tradeState.tokenAddress,
-              tradeState.amount.toString(),
-              privateKey,
-              userId
-            );
-            
-            // Sum up token amounts from all transactions
-            const totalTokens = result.reduce((sum, tx) => sum + parseFloat(tx.tokenAmount), 0);
-            
-            bot.sendMessage(chatId, 
-              `✅ Successfully bought ${totalTokens.toFixed(6)} ${tradeState.tokenInfo.symbol} with ${tradeState.amount} ETH!\n\n` +
-              `Your order was split into ${result.length} transactions for MEV protection.`
-            );
-          } else {
-            // Execute single transaction
-            result = await buyTokensWithEth(
-              tradeState.tokenAddress,
-              tradeState.amount.toString(),
-              privateKey,
-              CONFIG.DEFAULT_SLIPPAGE,
-              userId
-            );
-            
-            bot.sendMessage(chatId, 
-              `✅ Successfully bought ${result.tokenAmount} ${tradeState.tokenInfo.symbol} with ${tradeState.amount} ETH!\n\n` +
-              `Transaction hash: ${result.txHash}`
-            );
-          }
-        } else {
-          // Check if MEV protection should be applied
-          let result;
-          if (CONFIG.MEV_PROTECTION.ENABLED && 
-              tradeState.estimatedEth > parseFloat(CONFIG.MEV_PROTECTION.THRESHOLD)) {
-            // Use order splitting for MEV protection
-            result = await splitSellOrder(
-              tradeState.tokenAddress,
-              tradeState.amount.toString(),
-              privateKey,
-              userId
-            );
-            
-            // Sum up ETH amounts from all transactions
-            const totalEth = result.reduce((sum, tx) => sum + parseFloat(tx.ethAmount), 0);
-            
-            bot.sendMessage(chatId, 
-              `✅ Successfully sold ${tradeState.amount} ${tradeState.tokenInfo.symbol} for ${totalEth.toFixed(6)} ETH!\n\n` +
-              `Your order was split into ${result.length} transactions for MEV protection.`
-            );
-          } else {
-            // Execute single transaction
-            result = await sellTokensForEth(
-              tradeState.tokenAddress,
-              tradeState.amount.toString(),
-              privateKey,
-              CONFIG.DEFAULT_SLIPPAGE,
-              userId
-            );
-            
-            bot.sendMessage(chatId, 
-              `✅ Successfully sold ${tradeState.amount} ${tradeState.tokenInfo.symbol} for ${result.ethAmount} ETH!\n\n` +
-              `Transaction hash: ${result.txHash}`
-            );
+      // Add other common tokens
+      if (typeof tokens === 'object' && tokens !== null) {
+        for (const [symbol, address] of Object.entries(tokens)) {
+          if (symbol !== 'ETH') { // Skip ETH as we added it separately
+            tokenButtons.push([{ text: `${symbol}`, callback_data: `swap_from_${symbol}` }]);
           }
         }
-        
-        // Clear trade state
-        tradeStates.delete(userId);
-        
-      } catch (error) {
-        bot.sendMessage(chatId, `❌ Error executing trade: ${error.message}`);
-        tradeStates.delete(userId);
+      }
+      
+      // Add back button
+      tokenButtons.push([{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]);
+      
+      // Store user's tokens for the session
+      if (!users.has(chatId.toString())) {
+        users.set(chatId.toString(), {});
+      }
+      const userData = users.get(chatId.toString());
+      userData.availableTokens = tokens;
+      
+      bot.sendMessage(chatId, '🔄 <b>Swap Tokens</b>\n\nSelect a token to swap <b>from</b>:', {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: tokenButtons
+        }
+      });
+    } else {
+      bot.sendMessage(chatId, `❌ Error loading tokens: ${tokensResult.message}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 Try Again', callback_data: 'trade_swap' }],
+            [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+          ]
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error initializing token swap:', error);
+    bot.sendMessage(chatId, `❌ Error initializing swap: ${error.message}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+        ]
+      }
+    });
+  }
+}
+
+export async function handleSwapFrom(
+  bot: TelegramBot,
+  chatId: number,
+  action: string,
+  users: Map<string, UserData>
+): Promise<void> {
+  try {
+    // Extract the token symbol from the callback data
+    const fromToken = action.substring('swap_from_'.length);
+    
+    // Get user data
+    if (!users.has(chatId.toString())) {
+      users.set(chatId.toString(), {});
+    }
+    const userData = users.get(chatId.toString());
+    
+    // Store the fromToken for the session
+    userData.swapFromToken = fromToken;
+    
+    // Get available tokens with fallback
+    const tokens = userData.availableTokens || {
+      ETH: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE',
+      WETH: '0x4200000000000000000000000000000000000006',
+      USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      USDT: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA'
+    };
+    
+    // Create buttons for tokens to swap to
+    const tokenButtons = [];
+    
+    // Add ETH if from token isn't ETH
+    if (fromToken !== 'ETH') {
+      tokenButtons.push([{ text: '💠 ETH (Native)', callback_data: 'swap_to_ETH' }]);
+    }
+    
+    // Add other tokens except the from token
+    if (typeof tokens === 'object' && tokens !== null) {
+      for (const [symbol, address] of Object.entries(tokens)) {
+        if (symbol !== 'ETH' && symbol !== fromToken) {
+          tokenButtons.push([{ text: symbol, callback_data: `swap_to_${symbol}` }]);
+        }
       }
     }
+    
+    // Add custom token option for sniping
+    tokenButtons.push([{ text: '🎯 Custom Token (Snipe)', callback_data: 'swap_to_custom' }]);
+    
+    // Add back buttons
+    tokenButtons.push([
+      { text: '⬅️ Different Source', callback_data: 'trade_swap' },
+      { text: '🏠 Back to Trading', callback_data: 'show_trade_options' }
+    ]);
+    
+    bot.sendMessage(chatId, `🔄 <b>Swap Tokens</b>\n\nSwapping from <b>${fromToken}</b>\n\nSelect a token to swap <b>to</b>:`, {
+      parse_mode: 'HTML' as const,
+      reply_markup: {
+        inline_keyboard: tokenButtons
+      }
+    });
+  } catch (error) {
+    console.error('Error selecting from token for swap:', error);
+    bot.sendMessage(chatId, `❌ Error selecting token: ${error.message}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+        ]
+      }
+    });
+  }
+}
+
+export async function handleSwapToCustom(
+  bot: TelegramBot,
+  chatId: number,
+  users: Map<string, UserData>,
+  conversationStates: Map<number, any>
+): Promise<void> {
+  try {
+    // Get user data
+    if (!users.has(chatId.toString())) {
+      users.set(chatId.toString(), {});
+    }
+    const userData = users.get(chatId.toString());
+    
+    // Get the from token
+    const fromToken = userData.swapFromToken;
+    
+    if (!fromToken) {
+      throw new Error('Source token not selected');
+    }
+    
+    // Set the conversation state for custom token input
+    conversationStates.set(chatId, 'AWAITING_CUSTOM_TOKEN');
+    
+    // Send message asking for custom token address
+    bot.sendMessage(chatId, `🎯 <b>Custom Token Snipe</b>\n\nSwapping from <b>${fromToken}</b> to custom token\n\nPlease enter the contract address of the token you want to snipe:\n\n<i>Example: 0x1234567890123456789012345678901234567890</i>`, {
+      parse_mode: 'HTML' as const,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '⬅️ Back to Token Selection', callback_data: 'trade_swap' }],
+          [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+        ]
+      }
+    });
+  } catch (error) {
+    console.error('Error selecting custom token for swap:', error);
+    bot.sendMessage(chatId, `❌ Error selecting token: ${error.message}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+        ]
+      }
+    });
+  }
+}
+
+export async function handleSwapTo(
+  bot: TelegramBot,
+  chatId: number,
+  action: string,
+  users: Map<string, UserData>,
+  conversationStates: Map<number, any>
+): Promise<void> {
+  try {
+    // Extract the token symbol from the callback data
+    const toToken = action.substring('swap_to_'.length);
+    
+    // Get user data
+    if (!users.has(chatId.toString())) {
+      users.set(chatId.toString(), {});
+    }
+    const userData = users.get(chatId.toString());
+    
+    // Store the toToken for the session
+    userData.swapToToken = toToken;
+    
+    // Get the from token
+    const fromToken = userData.swapFromToken;
+    
+    if (!fromToken) {
+      throw new Error('Source token not selected');
+    }
+    
+    // Set the conversation state
+    conversationStates.set(chatId, 'AWAITING_SWAP_AMOUNT');
+    
+    // Get tokens data
+    const tokens = userData.availableTokens || {};
+    
+    // Send message asking for amount
+    bot.sendMessage(chatId, `🔄 <b>Swap Tokens</b>\n\nSwapping from <b>${fromToken}</b> to <b>${toToken}</b>\n\nPlease enter the amount of ${fromToken} you want to swap:`, {
+      parse_mode: 'HTML' as const,
+      reply_markup: {
+        force_reply: true
+      }
+    });
+  } catch (error) {
+    console.error('Error selecting to token for swap:', error);
+    bot.sendMessage(chatId, `❌ Error selecting token: ${error.message}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+        ]
+      }
+    });
+  }
+}
+
+export async function handleTradeSell(
+  bot: TelegramBot,
+  chatId: number,
+  users: Map<string, UserData>
+): Promise<void> {
+  try {
+    const portfolio = await import('../../services/portfolio');
+    const portfolioData = await portfolio.getPortfolio(chatId.toString());
+    
+    if (portfolioData.success && portfolioData.tokens && portfolioData.tokens.length > 0) {
+      const tokenButtons = portfolioData.tokens.map(token => {
+        return [{ text: `${token.symbol} (${token.balance})`, callback_data: `sell_token_${token.address}` }];
+      });
+      
+      tokenButtons.push([{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]);
+      
+      bot.sendMessage(chatId, '💸 *Sell Tokens*\n\nSelect a token to sell:', {
+        parse_mode: 'HTML' as const,
+        reply_markup: {
+          inline_keyboard: tokenButtons
+        }
+      });
+    } else {
+      bot.sendMessage(chatId, '❌ No tokens found in your portfolio.', {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error getting tokens for sell:', error);
+    bot.sendMessage(chatId, '❌ An error occurred while loading your tokens.');
+  }
+}
+
+export async function handleCancelTrade(
+  bot: TelegramBot,
+  chatId: number,
+  conversationStates: Map<number, any>
+): Promise<void> {
+  bot.sendMessage(chatId, '❌ <b>Trade Cancelled</b>', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🔙 Back to Trade Options', callback_data: 'show_trade_options' }]
+      ]
+    }
   });
-}; 
+  conversationStates.delete(chatId);
+} 

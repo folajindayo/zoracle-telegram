@@ -6,6 +6,33 @@ import { CONFIG } from '../../config/index';
 import TelegramBot from 'node-telegram-bot-api';
 import { WALLET_STATES } from '../../types/index';
 import { escapeMarkdown, escapeMarkdownPreserveFormat, markdownToHtml } from '../../utils/telegramUtils';
+import { ethers } from 'ethers';
+import { getTranslation, getLanguageName, getAvailableLanguages } from '../../utils/translations';
+
+// Types
+export interface UserData {
+  walletAddress?: string;
+  isCreating?: boolean;
+  tempPK?: string;
+  pin?: string;
+  [key: string]: any;
+}
+
+export interface ConversationStates {
+  WELCOME: number;
+  WALLET_SETUP: number;
+  PIN_SETUP: number;
+  TWOFA_SETUP: number;
+  COMPLETE: number;
+}
+
+export const STATES: ConversationStates = {
+  WELCOME: 0,
+  WALLET_SETUP: 1,
+  PIN_SETUP: 2,
+  TWOFA_SETUP: 3,
+  COMPLETE: 4
+};
 
 // Conversation states
 const WALLET_STATE_VALUES = {
@@ -17,6 +44,174 @@ const WALLET_STATE_VALUES = {
 
 // In-memory PIN storage (should be temporary)
 const tempPins = new Map<string, any>();
+
+// Helper functions
+export async function getUserLanguage(telegramId: string): Promise<string> {
+  try {
+    const { UserOps } = await import('../../database/operations');
+    return await UserOps.getUserLanguage(telegramId);
+  } catch (error) {
+    console.error('Error getting user language:', error);
+    return 'en'; // Default to English
+  }
+}
+
+export async function getTranslatedMessage(key: string, telegramId: string): Promise<string> {
+  const language = await getUserLanguage(telegramId);
+  return getTranslation(key, language);
+}
+
+export async function getWelcomeMessage(telegramId: string): Promise<string> {
+  const title = await getTranslatedMessage('welcome_title', telegramId);
+  const description = await getTranslatedMessage('welcome_description', telegramId);
+  const chatIdLabel = await getTranslatedMessage('chat_id_label', telegramId);
+  
+  return `${title}\n\n${description}\n\nTo get started, use /start your_wallet_address\n\n${chatIdLabel}`;
+}
+
+// Wallet handlers
+export async function handleWalletCreate(
+  bot: TelegramBot,
+  chatId: number,
+  conversationStates: Map<number, any>,
+  users: Map<string, UserData>
+): Promise<void> {
+  conversationStates.set(chatId, STATES.WALLET_SETUP);
+  const userData = users.get(chatId.toString()) || {};
+  userData.isCreating = true;
+  delete userData.tempPK; // Clear any previous import data
+  users.set(chatId.toString(), userData);
+  
+  bot.sendMessage(chatId, '🔐 <b>Create a New Wallet</b>\n\nPlease enter a strong password for your new wallet:', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      force_reply: true
+    }
+  });
+}
+
+export async function handleWalletImport(
+  bot: TelegramBot,
+  chatId: number
+): Promise<void> {
+  bot.sendMessage(chatId, '📥 <b>Import Wallet</b>\n\nPlease select import method:', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🔑 Private Key', callback_data: 'import_privatekey' }],
+        [{ text: '🔤 Seed Phrase', callback_data: 'import_seed' }],
+        [{ text: '↩️ Back', callback_data: 'back_to_start' }]
+      ]
+    }
+  });
+}
+
+export async function handleImportPrivateKey(
+  bot: TelegramBot,
+  chatId: number,
+  conversationStates: Map<number, any>
+): Promise<void> {
+  conversationStates.set(chatId, 'AWAITING_PRIVATEKEY');
+  bot.sendMessage(chatId, '🔑 *Import with Private Key*\n\nPlease enter your private key:\n\n⚠️ _Never share your private key with anyone else!_', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      force_reply: true
+    }
+  });
+}
+
+export async function handleImportSeed(
+  bot: TelegramBot,
+  chatId: number,
+  conversationStates: Map<number, any>
+): Promise<void> {
+  conversationStates.set(chatId, 'AWAITING_SEED');
+  bot.sendMessage(chatId, '🔤 *Import with Seed Phrase*\n\nPlease enter your 12 or 24-word seed phrase:\n\n⚠️ _Never share your seed phrase with anyone else!_', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      force_reply: true
+    }
+  });
+}
+
+export async function handleWalletUnlock(
+  bot: TelegramBot,
+  chatId: number,
+  conversationStates: Map<number, any>
+): Promise<void> {
+  conversationStates.set(chatId, 'AWAITING_PASSWORD');
+  bot.sendMessage(chatId, '🔓 *Unlock Wallet*\n\nPlease enter your wallet password:', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      force_reply: true
+    }
+  });
+}
+
+export async function handleWalletQuickUnlock(
+  bot: TelegramBot,
+  chatId: number,
+  conversationStates: Map<number, any>
+): Promise<void> {
+  conversationStates.set(chatId, 'AWAITING_PIN');
+  bot.sendMessage(chatId, '🔐 *Quick Unlock*\n\nPlease enter your PIN:', {
+    parse_mode: 'HTML' as const,
+    reply_markup: {
+      force_reply: true
+    }
+  });
+}
+
+export async function handleEnable2FA(
+  bot: TelegramBot,
+  chatId: number,
+  conversationStates: Map<number, any>
+): Promise<void> {
+  try {
+    const walletManager = await import('../../services/cdpWallet');
+    const qr = await walletManager.get2FAQRCode(chatId.toString());
+    
+    if (qr.success) {
+      bot.sendMessage(chatId, `📱 *2FA Setup*\n\nScan this QR code with your authenticator app:\n\n${qr.qrCode}\n\nThen enter the 6-digit code to verify:`, {
+        parse_mode: 'Markdown' as const
+      });
+      conversationStates.set(chatId, 'AWAITING_2FA_TOKEN');
+    } else {
+      bot.sendMessage(chatId, '❌ Failed to generate 2FA QR code: ' + qr.message);
+    }
+  } catch (error) {
+    console.error('Error enabling 2FA:', error);
+    bot.sendMessage(chatId, '❌ Error setting up 2FA. Please try again.');
+  }
+}
+
+export async function handleSkip2FA(
+  bot: TelegramBot,
+  chatId: number,
+  conversationStates: Map<number, any>,
+  showMainMenu: (chatId: number) => Promise<void>
+): Promise<void> {
+  conversationStates.set(chatId, STATES.COMPLETE);
+  await showMainMenu(chatId);
+}
+
+export async function handleBackToStart(
+  bot: TelegramBot,
+  chatId: number
+): Promise<void> {
+  const setupOptions = {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🔑 Create New Wallet', callback_data: 'wallet_create' }],
+        [{ text: '📥 Import Existing Wallet', callback_data: 'wallet_import' }],
+        [{ text: '❓ Help', callback_data: 'show_help' }]
+      ]
+    },
+    parse_mode: 'HTML' as const
+  };
+  
+  bot.sendMessage(chatId, 'What would you like to do?', setupOptions);
+}
 
 export default function initWalletHandlers(bot: TelegramBot, users: Map<string, any>): void {
   // Wallet command

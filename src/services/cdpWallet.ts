@@ -596,21 +596,11 @@ async function getWalletBalances(userId): Promise<any> {
         
         console.log('UseZoracle API Response:', JSON.stringify(response.data, null, 2));
         
-        // Extract and format balances correctly
-        const formattedBalances = {};
-        
-        if (Array.isArray(response.data.data.balances)) {
-          response.data.data.balances.forEach(item => {
-            if (item.token && item.token.symbol) {
-              formattedBalances[item.token.symbol] = item.amount.formatted;
-            }
-          });
-        }
-        
+        // Return the complete API response structure for portfolio display
         return {
           success: true,
-          address,
-          balances: formattedBalances
+          data: response.data.data,  // Include the complete data structure
+          address
         };
       } catch (apiError) {
         console.error('UseZoracle API Error:', apiError.message);

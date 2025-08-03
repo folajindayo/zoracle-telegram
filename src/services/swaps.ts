@@ -156,7 +156,7 @@ async function executeSwap(accountName: string, fromToken: string, toToken: stri
 async function getTokenPrice(tokenAddress: string, network: string = 'base'): Promise<any> {
   try {
     // Import config for API key
-    const { CONFIG } = require('../config/index');
+    const { CONFIG } = await import('../config/index');
     
     // Try Ankr Advanced API first
     try {

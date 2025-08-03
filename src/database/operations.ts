@@ -93,6 +93,33 @@ const UserOps = {
   },
 
   /**
+   * Update user's language preference
+   * @param {string} telegramId - Telegram ID
+   * @param {string} language - Language code
+   * @returns {Promise<Object>} Updated user object
+   */
+  async updateUserLanguage(telegramId, language) {
+    console.log(`🌐 Database: Updating language for user ${telegramId} to ${language}`);
+    const result = await User.findOneAndUpdate(
+      { telegramId },
+      { language },
+      { new: true }
+    );
+    console.log(`✅ Database: Language updated successfully`);
+    return result;
+  },
+
+  /**
+   * Get user's language preference
+   * @param {string} telegramId - Telegram ID
+   * @returns {Promise<string>} Language code
+   */
+  async getUserLanguage(telegramId) {
+    const user = await User.findOne({ telegramId });
+    return user?.language || 'en';
+  },
+
+  /**
    * Get all users
    * @returns {Promise<Array>} Array of user objects
    */

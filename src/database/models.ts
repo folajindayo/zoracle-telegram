@@ -35,6 +35,11 @@ const UserSchema = new Schema({
   lastActive: {
     type: Date,
     default: Date.now
+  },
+  language: {
+    type: String,
+    default: 'en',
+    enum: ['en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'zh', 'ja', 'ko']
   }
 }, { timestamps: true });
 

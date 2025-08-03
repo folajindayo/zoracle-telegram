@@ -1,215 +1,355 @@
 /**
  * Portfolio Handlers for Zoracle Telegram Bot
  */
-import { getEthBalance, getTokenBalance, getTokenInfo, getWalletAddress  } from '../baseBot';
-import { CONFIG  } from '../../config';
-import { escapeMarkdown, escapeMarkdownPreserveFormat, markdownToHtml } from '../../utils/telegramUtils';
+import TelegramBot from 'node-telegram-bot-api';
+import { ethers } from 'ethers';
+import { UserData } from './walletHandlers';
 
-// Mock transaction history (in a real implementation, this would be stored in a database)
-const mockTransactions = new Map();
+export async function handleShowPortfolio(
+  bot: TelegramBot,
+  chatId: number,
+  users: Map<string, UserData>
+): Promise<void> {
+  try {
+    // Import wallet manager directly
+    const walletManager = await import('../../services/cdpWallet');
+    const userId = chatId.toString();
 
-module.exports = (bot, users) => {
-  // Portfolio command
-  bot.onText(/\/portfolio/, async (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id.toString();
-    
-    // Check if user has a wallet
+    // Get user data
+    if (!users.has(userId)) {
+      users.set(userId, {});
+    }
     const user = users.get(userId);
     
-    if (!user || !user.wallet) {
-      bot.sendMessage(chatId, 'You don\'t have a wallet set up yet. Use /wallet to set up a wallet.');
+    // Check if wallet exists
+    if (!walletManager.userHasWallet(userId)) {
+      bot.sendMessage(chatId, '❌ You don\'t have a wallet set up yet. Please use /wallet to create one.');
       return;
     }
     
-    try {
-      // Import the walletManager directly to access real wallet balances
-      const walletManager = require('../../services/cdpWallet');
-
-      // Check if the wallet is unlocked
-      const isUnlocked = walletManager.isWalletUnlocked(userId);
-      if (!isUnlocked) {
-        // Try to unlock the wallet
-        if (user.pin) {
-          await walletManager.quickUnlockWallet(userId, user.pin);
-        } else {
-          bot.sendMessage(chatId, 'Your wallet is locked. Please use /wallet to unlock it first.');
+    // Check if wallet is unlocked and try to unlock with PIN
+    if (!walletManager.isWalletUnlocked(userId)) {
+      if (user.pin) {
+        const unlockResult = await walletManager.quickUnlockWallet(userId, user.pin);
+        if (!unlockResult.success) {
+          bot.sendMessage(chatId, `❌ Your wallet is locked. Please use /wallet to unlock it first.\n\nError: ${unlockResult.message}`);
           return;
         }
-      }
-
-      // Get real wallet balances from UseZoracle API
-      const balanceResult = await walletManager.getWalletBalances(userId);
-      
-      if (!balanceResult.success) {
-        bot.sendMessage(chatId, `❌ Error: ${balanceResult.message}`);
+      } else {
+        bot.sendMessage(chatId, '❌ Your wallet is locked. Please use /wallet to unlock it first.');
         return;
       }
-
-      const balances = balanceResult.balances || {};
-      const tokens = Object.keys(balances);
-      const address = balanceResult.address; // Get the wallet address
-      
-      // Simple price mapping for estimation
-      const priceMapping = {
-        'ETH': 3000,
-        'WETH': 3000,
-        'USDC': 1,
-        'USDT': 1,
-        'ZORA': 2.5,
-        'DEFAULT': 1 // Default price for unknown tokens
-      };
-
-      // Calculate total portfolio value
-      let totalValue = 0;
-      
-        // Build portfolio message
-  let portfolioMessage = `
-💼 <b>Your Portfolio</b>
-📝 <b>Wallet Address:</b> ${address}
-`;
-
-      if (tokens.length === 0) {
-        portfolioMessage += `\nTotal Value: N/A\n\n\nNo tokens found in your portfolio.`;
-      } else {
-        // Calculate total value and prepare the holdings display
-        let holdingsText = `\n<b>Holdings:</b>\n`;
-        
-        for (const symbol of tokens) {
-          const balance = parseFloat(balances[symbol]);
-          const price = priceMapping[symbol] || priceMapping.DEFAULT;
-          const value = balance * price;
-          
-          totalValue += value;
-          holdingsText += `• ${symbol}: ${balances[symbol]} ($${value.toFixed(2)})\n`;
-        }
-        
-        portfolioMessage += `Total Value: $${totalValue.toFixed(2)}\n${holdingsText}`;
-      }
-      
-      portfolioMessage += `
-Use /transactions to view your transaction history.
-Use /pnl to calculate your profit/loss.
-`;
-      
-      bot.sendMessage(chatId, portfolioMessage, { parse_mode: 'HTML' as const });
-    } catch (error) {
-      bot.sendMessage(chatId, `❌ Error fetching portfolio: ${error.message}`);
     }
-  });
-  
-  // Transactions command
-  bot.onText(/\/transactions/, async (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id.toString();
     
-    // Check if user has a wallet
-    const user = users.get(userId);
+    // Get real wallet balances from UseZoracle API
+    const balanceResult = await walletManager.getWalletBalances(userId);
     
-    if (!user || !user.wallet) {
-      bot.sendMessage(chatId, 'You don\'t have a wallet set up yet. Use /wallet to set up a wallet.');
+    if (!balanceResult.success) {
+      bot.sendMessage(chatId, `❌ Failed to load portfolio: ${balanceResult.message}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+          ]
+        }
+      });
       return;
     }
     
-    // Get user's transactions (mock data)
-    const userTransactions = mockTransactions.get(userId) || [];
+    // Process the balance data using the new API response format
+    const balances = balanceResult.data?.balances || [];
+    const totalUsdValue = balanceResult.data?.totalUsdValue || 0;
     
-    if (userTransactions.length === 0) {
-      // If no transactions, add some mock data
-      const mockTxs = [
-        { 
-          type: 'buy', 
-          token: 'WETH', 
-          amount: '0.5', 
-          price: '3000', 
-          timestamp: Date.now() - 86400000 * 3, // 3 days ago
-          txHash: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
-        },
-        { 
-          type: 'buy', 
-          token: 'USDC', 
-          amount: '100', 
-          price: '1', 
-          timestamp: Date.now() - 86400000 * 2, // 2 days ago
-          txHash: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890'
-        },
-        { 
-          type: 'buy', 
-          token: 'ZORA', 
-          amount: '25', 
-          price: '2.5', 
-          timestamp: Date.now() - 86400000, // 1 day ago
-          txHash: '0x7890abcdef1234567890abcdef1234567890abcdef1234567890abcdef123456'
-        }
-      ];
+    // Debug logging
+    console.log('Debug - balanceResult.data:', JSON.stringify(balanceResult.data, null, 2));
+    console.log('Debug - balances array:', balances);
+    console.log('Debug - balances.length:', balances.length);
+    console.log('Debug - totalUsdValue:', totalUsdValue);
+    
+    let portfolioText = '💰 <b>Your Portfolio</b>\n\n';
+    
+    // Add total value header using API response
+    const formattedTotalValue = totalUsdValue < 0.01 ? totalUsdValue.toFixed(6) : totalUsdValue.toFixed(2);
+    portfolioText += `Total Value: $${formattedTotalValue}\n\n`;
+    
+    if (balances.length === 0) {
+      portfolioText += 'No tokens found in your portfolio.\n';
+    } else {
+      portfolioText += 'Holdings:\n';
       
-      mockTransactions.set(userId, mockTxs);
-      userTransactions.push(...mockTxs);
+      // Process each token balance
+      for (const balance of balances) {
+        const token = balance.token;
+        const amount = balance.amount;
+        const usdValue = balance.usdValue || 0;
+        
+        // Format balance and USD value
+        const formattedBalance = parseFloat(amount.formatted).toFixed(6);
+        const formattedUsdValue = usdValue.toFixed(2);
+        
+        // Add token to portfolio message
+        portfolioText += `• ${token.symbol}: ${formattedBalance} ($${formattedUsdValue})\n`;
+      }
     }
     
-    // Get wallet address
-    const address = getWalletAddress(userId);
+    const portfolioOptions = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📊 Transaction History', callback_data: 'show_transactions' }],
+          [{ text: '🔄 Refresh Portfolio', callback_data: 'show_portfolio' }],
+          [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+        ]
+      },
+      parse_mode: 'HTML' as const
+    };
+    
+    bot.sendMessage(chatId, portfolioText, portfolioOptions);
+  } catch (error) {
+    console.error('Error displaying portfolio:', error);
+    bot.sendMessage(chatId, `❌ An error occurred while loading your portfolio: ${error.message}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+        ]
+      }
+    });
+  }
+}
+
+export async function handleShowTransactions(
+  bot: TelegramBot,
+  chatId: number,
+  callbackQuery: any
+): Promise<void> {
+  try {
+    const userId = callbackQuery.from.id.toString();
+    
+    // Check if user has a wallet
+    const walletManager = await import('../../services/cdpWallet');
+    
+    if (!walletManager.userHasWallet(userId)) {
+      bot.sendMessage(chatId, '❌ You don\'t have a wallet set up yet. Please use /wallet to create one.');
+      return;
+    }
+    
+    // Get UseZoracle API wallet address
+    const address = await walletManager.getUseZoracleAddress(userId);
+    
+    if (!address) {
+      bot.sendMessage(chatId, '❌ Unable to get wallet address. Please make sure your wallet is unlocked.');
+      return;
+    }
+    
+    // Show loading message
+    const loadingMessage = await bot.sendMessage(chatId, 
+      `🔍 <b>Loading Transaction History</b>\n📝 <b>Wallet:</b> ${address}\n\nFetching your transactions from the blockchain...`, 
+      { parse_mode: 'HTML' as const }
+    );
+    
+    // Import blockchain explorer service
+    const { getTransactions } = await import('../../services/blockExplorer');
+    
+    // Get real transaction data
+    const txResult = await getTransactions(address, 5);
+    
+    // Check if we got data successfully
+    if (!txResult.success || !txResult.data || txResult.data.length === 0) {
+      bot.editMessageText(
+        `📜 <b>Transaction History</b>\n📝 <b>Wallet Address:</b> ${address}\n\nNo transactions found for this wallet address. This could be a new wallet or our explorer API might be experiencing issues.`,
+        {
+          chat_id: chatId,
+          message_id: loadingMessage.message_id,
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Refresh', callback_data: 'refresh_history' }],
+              [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+            ]
+          }
+        }
+      );
+      return;
+    }
     
     // Build transactions message
-    let txMessage = '📜 <b>Transaction History</b>\n';
+    let txMessage = `📜 <b>Transaction History</b>\n`;
     txMessage += `📝 <b>Wallet Address:</b> ${address}\n\n`;
     
-    for (const tx of userTransactions) {
+    // Parse and display transactions
+    for (const tx of txResult.data) {
+      // Format the date
       const date = new Date(tx.timestamp).toLocaleDateString();
-      txMessage += `${date} - ${tx.type.toUpperCase()} ${tx.amount} ${tx.token} @ $${tx.price}\n`;
+      const time = new Date(tx.timestamp).toLocaleTimeString();
+      
+      // Format transaction type
+      let typeIcon = '↔️';
+      let typeText = 'INTERACTION';
+      
+      if (tx.from && tx.to && tx.from.toLowerCase() === address.toLowerCase()) {
+        typeIcon = '📤';
+        typeText = 'SENT';
+      } else if (tx.to && tx.to.toLowerCase() === address.toLowerCase()) {
+        typeIcon = '📥';
+        typeText = 'RECEIVED';
+      }
+      
+      // Format the value
+      const valueText = tx.value ? `${tx.value.toFixed(6)} ETH` : '';
+      
+      // Transaction status
+      const statusIcon = tx.status === 'success' ? '✅' : '❌';
+      
+      // Build transaction line
+      txMessage += `${typeIcon} <b>${typeText}</b> ${statusIcon} - ${date} ${time}\n`;
+      if (valueText) {
+        txMessage += `Amount: ${valueText}\n`;
+      }
       txMessage += `<a href="https://basescan.org/tx/${tx.txHash}">View on Basescan</a>\n\n`;
     }
     
-          bot.sendMessage(chatId, txMessage, { parse_mode: 'HTML' as const });
-  });
-  
-  // PnL (Profit and Loss) command
-  bot.onText(/\/pnl/, async (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id.toString();
-    
-    // Check if user has a wallet
-    const user = users.get(userId);
-    
-    if (!user || !user.wallet) {
-      bot.sendMessage(chatId, 'You don\'t have a wallet set up yet. Use /wallet to set up a wallet.');
-      return;
-    }
-    
-    // Get user's transactions (mock data)
-    const userTransactions = mockTransactions.get(userId) || [];
-    
-    if (userTransactions.length === 0) {
-      bot.sendMessage(chatId, 'You don\'t have any transactions yet.');
-      return;
-    }
-    
-    // Calculate P&L (mock data)
-    const pnlData = {
-      totalInvested: 350, // $350 total invested
-      currentValue: 425, // $425 current value
-      profitLoss: 75, // $75 profit
-      percentChange: 21.43 // 21.43% increase
+    // Add options to return to portfolio or main menu
+    const options = {
+      parse_mode: 'HTML' as const,
+      chat_id: chatId,
+      message_id: loadingMessage.message_id,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔄 Refresh', callback_data: 'refresh_history' }],
+          [{ text: '⬅️ Back to Portfolio', callback_data: 'show_portfolio' }],
+          [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+        ]
+      }
     };
     
-    // Get wallet address
-    const address = getWalletAddress(userId);
-    
-    // Build PnL message
-    let pnlMessage = `
-📊 <b>Profit & Loss</b>
-📝 <b>Wallet Address:</b> ${address}
+    bot.editMessageText(txMessage, options);
+  } catch (error) {
+    console.error('Error displaying transaction history:', error);
+    bot.sendMessage(chatId, `❌ An error occurred while loading your transaction history: ${error.message}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+        ]
+      }
+    });
+  }
+}
 
-Total Invested: $${pnlData.totalInvested.toFixed(2)}
-Current Value: $${pnlData.currentValue.toFixed(2)}
-`;
+export async function handleRefreshHistory(
+  bot: TelegramBot,
+  chatId: number,
+  callbackQuery: any
+): Promise<void> {
+  try {
+    const userId = callbackQuery.from.id.toString();
     
-    if (pnlData.profitLoss >= 0) {
-      pnlMessage += `Profit: $${pnlData.profitLoss.toFixed(2)} (+${pnlData.percentChange.toFixed(2)}%)`;
-    } else {
-      pnlMessage += `Loss: $${Math.abs(pnlData.profitLoss).toFixed(2)} (-${Math.abs(pnlData.percentChange).toFixed(2)}%)`;
+    // Check if user has a wallet
+    const walletManager = await import('../../services/cdpWallet');
+    
+    if (!walletManager.userHasWallet(userId)) {
+      bot.sendMessage(chatId, '❌ You don\'t have a wallet set up yet. Please use /wallet to create one.');
+      return;
     }
     
-          bot.sendMessage(chatId, pnlMessage, { parse_mode: 'HTML' as const });
-  });
-}; 
+    // Clear address cache to force fresh API call
+    walletManager.clearAddressCache(userId);
+    
+    // Get UseZoracle API wallet address
+    const address = await walletManager.getUseZoracleAddress(userId);
+    
+    if (!address) {
+      bot.sendMessage(chatId, '❌ Unable to get wallet address. Please make sure your wallet is unlocked.');
+      return;
+    }
+    
+    // Show loading message
+    const loadingMessage = await bot.sendMessage(chatId, 
+      `🔍 <b>Refreshing Transaction History</b>\n📝 <b>Wallet:</b> ${address}\n\nFetching your latest transactions from the blockchain...`, 
+      { parse_mode: 'HTML' as const }
+    );
+    
+    // Import blockchain explorer service
+    const { getTransactions } = await import('../../services/blockExplorer');
+    
+    // Get real transaction data (force refresh to bypass cache)
+    const txResult = await getTransactions(address, 5, true);
+    
+    // Check if we got data successfully
+    if (!txResult.success || !txResult.data || txResult.data.length === 0) {
+      bot.editMessageText(
+        `📜 <b>Transaction History</b>\n📝 <b>Wallet Address:</b> ${address}\n\nNo transactions found for this wallet address. This could be a new wallet or our explorer API might be experiencing issues.`,
+        {
+          chat_id: chatId,
+          message_id: loadingMessage.message_id,
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Refresh', callback_data: 'refresh_history' }],
+              [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+            ]
+          }
+        }
+      );
+      return;
+    }
+    
+    // Build transactions message
+    let txMessage = `📜 <b>Transaction History</b>\n`;
+    txMessage += `📝 <b>Wallet Address:</b> ${address}\n\n`;
+    
+    // Parse and display transactions
+    for (const tx of txResult.data) {
+      // Format the date
+      const date = new Date(tx.timestamp).toLocaleDateString();
+      const time = new Date(tx.timestamp).toLocaleTimeString();
+      
+      // Format transaction type
+      let typeIcon = '↔️';
+      let typeText = 'INTERACTION';
+      
+      if (tx.from && tx.to && tx.from.toLowerCase() === address.toLowerCase()) {
+        typeIcon = '📤';
+        typeText = 'SENT';
+      } else if (tx.to && tx.to.toLowerCase() === address.toLowerCase()) {
+        typeIcon = '📥';
+        typeText = 'RECEIVED';
+      }
+      
+      // Format the value
+      const valueText = tx.value ? `${tx.value.toFixed(6)} ETH` : '';
+      
+      // Transaction status
+      const statusIcon = tx.status === 'success' ? '✅' : '❌';
+      
+      // Build transaction line
+      txMessage += `${typeIcon} <b>${typeText}</b> ${statusIcon} - ${date} ${time}\n`;
+      if (valueText) {
+        txMessage += `Amount: ${valueText}\n`;
+      }
+      txMessage += `<a href="https://basescan.org/tx/${tx.txHash}">View on Basescan</a>\n\n`;
+    }
+    
+    // Add options to return to portfolio or main menu
+    const options = {
+      parse_mode: 'HTML' as const,
+      chat_id: chatId,
+      message_id: loadingMessage.message_id,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔄 Refresh', callback_data: 'refresh_history' }],
+          [{ text: '⬅️ Back to Portfolio', callback_data: 'show_portfolio' }],
+          [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+        ]
+      }
+    };
+    
+    bot.editMessageText(txMessage, options);
+  } catch (error) {
+    console.error('Error refreshing transaction history:', error);
+    bot.sendMessage(chatId, `❌ An error occurred while refreshing your transaction history: ${error.message}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
+        ]
+      }
+    });
+  }
+} 
