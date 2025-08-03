@@ -2,7 +2,6 @@
  * Copy-Trade Handlers for Zoracle Telegram Bot
  */
 import { ethers  } from 'ethers';
-import { getEthBalance, decryptData  } from '../baseBot';
 import { CONFIG  } from '../../config';
 import * as copyTradeService from '../../services/copytrade';
 import { CopyTradeOps, UserOps  } from '../../database/operations';
@@ -237,7 +236,7 @@ module.exports = (bot, users) => {
           
         case COPYTRADE_STATES.AWAITING_SLIPPAGE:
           // Validate slippage
-          var slippage = parseFloat(text);
+          let slippage = parseFloat(text);
           
           if (isNaN(slippage) || slippage < 0.1 || slippage > 10) {
             bot.sendMessage(chatId, '❌ Invalid slippage. Please enter a number between 0.1 and 10.');

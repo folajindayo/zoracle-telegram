@@ -1,7 +1,6 @@
 /**
  * Discovery Handlers for Zoracle Telegram Bot
  */
-import { getTokenInfo  } from '../baseBot';
 import { CONFIG  } from '../../config';
 import axios from 'axios';
 import { escapeMarkdown, escapeMarkdownPreserveFormat, markdownToHtml } from '../../utils/telegramUtils';
