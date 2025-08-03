@@ -204,70 +204,6 @@ export async function handleImportSeed(
   );
 }
 
-export async function handleWalletUnlock(
-  bot: TelegramBot,
-  chatId: number,
-  conversationStates: Map<number, any>
-): Promise<void> {
-  const userId = chatId.toString();
-
-  try {
-    // Auto-unlock wallet without password
-    const result = await walletManager.loadWallet(userId, "");
-
-    if (result.success) {
-      bot.sendMessage(
-        chatId,
-        "✅ <b>Wallet unlocked successfully!</b>\n\nYour wallet is now ready to use.",
-        {
-          parse_mode: "HTML" as const,
-        }
-      );
-      conversationStates.set(chatId, STATES.COMPLETE);
-    } else {
-      bot.sendMessage(chatId, `❌ Failed to unlock wallet: ${result.message}`);
-    }
-  } catch (error) {
-    console.error("Error unlocking wallet:", error);
-    bot.sendMessage(
-      chatId,
-      "❌ An error occurred while unlocking your wallet. Please try again later."
-    );
-  }
-}
-
-export async function handleWalletQuickUnlock(
-  bot: TelegramBot,
-  chatId: number,
-  conversationStates: Map<number, any>
-): Promise<void> {
-  const userId = chatId.toString();
-
-  try {
-    // Auto-unlock wallet without PIN
-    const result = await walletManager.quickUnlockWallet(userId, "");
-
-    if (result.success) {
-      bot.sendMessage(
-        chatId,
-        "✅ <b>Wallet unlocked successfully!</b>\n\nYour wallet is now ready to use.",
-        {
-          parse_mode: "HTML" as const,
-        }
-      );
-      conversationStates.set(chatId, STATES.COMPLETE);
-    } else {
-      bot.sendMessage(chatId, `❌ Failed to unlock wallet: ${result.message}`);
-    }
-  } catch (error) {
-    console.error("Error unlocking wallet:", error);
-    bot.sendMessage(
-      chatId,
-      "❌ An error occurred while unlocking your wallet. Please try again later."
-    );
-  }
-}
-
 export async function handleEnable2FA(
   bot: TelegramBot,
   chatId: number,
@@ -466,19 +402,6 @@ What would you like to do?
         return;
       }
 
-      // Auto-unlock wallet if needed
-      if (!walletManager.isWalletUnlocked(userId)) {
-        const unlockResult = await walletManager.loadWallet(userId, "");
-        if (!unlockResult.success) {
-          bot.sendMessage(
-            chatId,
-            `❌ Failed to unlock wallet: ${unlockResult.message}`
-          );
-          bot.answerCallbackQuery(callbackQuery.id);
-          return;
-        }
-      }
-
       try {
         const walletAddress =
           (await walletManager.getUseZoracleAddress(userId)) ||
@@ -514,15 +437,6 @@ What would you like to do?
           text: "Error getting balance",
         });
       }
-    } else if (action === "wallet_lock") {
-      // Lock wallet
-      users.delete(userId);
-
-      bot.sendMessage(
-        chatId,
-        "🔒 Your wallet has been locked. Use /wallet to unlock it."
-      );
-      bot.answerCallbackQuery(callbackQuery.id);
     } else if (action === "wallet_export") {
       // Export private key (no PIN required)
       try {

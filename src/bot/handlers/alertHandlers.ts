@@ -39,18 +39,6 @@ module.exports = (bot, users) => {
       return;
     }
 
-    // Auto-unlock wallet if needed
-    if (!walletManager.isWalletUnlocked(userId)) {
-      const unlockResult = await walletManager.loadWallet(userId, "");
-      if (!unlockResult.success) {
-        bot.sendMessage(
-          chatId,
-          `❌ Failed to unlock wallet: ${unlockResult.message}`
-        );
-        return;
-      }
-    }
-
     // Get user's alerts
     const userAlerts = alerts.get(userId) || [];
 
@@ -126,18 +114,6 @@ module.exports = (bot, users) => {
         "You don't have a wallet set up yet. Use /wallet to set up a wallet."
       );
       return;
-    }
-
-    // Auto-unlock wallet if needed
-    if (!walletManager.isWalletUnlocked(userId)) {
-      const unlockResult = await walletManager.loadWallet(userId, "");
-      if (!unlockResult.success) {
-        bot.sendMessage(
-          chatId,
-          `❌ Failed to unlock wallet: ${unlockResult.message}`
-        );
-        return;
-      }
     }
 
     // Start alert creation flow

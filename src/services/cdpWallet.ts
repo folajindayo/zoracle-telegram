@@ -362,23 +362,17 @@ function userHasWallet(userId): boolean {
 /**
  * Get wallet data for a user
  * @param {string} userId - Telegram user ID
- * @returns {Promise<Object|null>} - Wallet data or null if not found/unlocked
+ * @returns {Promise<Object|null>} - Wallet data or null if not found
  */
 async function getWallet(userId: string): Promise<any> {
-  // Check if wallet is in session (already unlocked)
-  if (isWalletUnlocked(userId)) {
-    return walletSessions.get(userId);
-  }
-
   // Check if wallet exists
   if (!userHasWallet(userId)) {
     return null;
   }
 
-  // Wallet exists but is locked
+  // Return wallet address
   return {
     address: getWalletAddress(userId),
-    isLocked: true,
   };
 }
 
@@ -408,26 +402,23 @@ function getWalletAddress(userId): string | null {
  */
 async function getUseZoracleAddress(userId): Promise<string | null> {
   try {
-    // Check if wallet is unlocked
-    if (!isWalletUnlocked(userId)) {
+    // Check if wallet exists
+    if (!userHasWallet(userId)) {
       return null;
     }
 
-    const session = walletSessions.get(userId);
-    if (!session || !session.accountName) {
-      return null;
-    }
+    const accountName = `zoracle-${userId}`;
 
     if (SIMULATION_MODE) {
       // Return local wallet address in simulation mode
       return getWalletAddress(userId);
     } else {
       // Check cache first to avoid hitting rate limits
-      const cacheKey = `address_${session.accountName}`;
+      const cacheKey = `address_${accountName}`;
       const cachedData = addressCache.get(cacheKey);
       if (cachedData && Date.now() - cachedData.timestamp < CACHE_DURATION) {
         console.log(
-          `Using cached address for ${session.accountName}: ${cachedData.address}`
+          `Using cached address for ${accountName}: ${cachedData.address}`
         );
         return cachedData.address;
       }
@@ -435,11 +426,11 @@ async function getUseZoracleAddress(userId): Promise<string | null> {
       // Use real UseZoracle API to get the account details
       try {
         console.log(
-          `Getting UseZoracle API account details for: ${session.accountName}`
+          `Getting UseZoracle API account details for: ${accountName}`
         );
 
         const response = await axios.get(
-          `${API_BASE_URL}/api/accounts/${session.accountName}`,
+          `${API_BASE_URL}/api/accounts/${accountName}`,
           {
             timeout: 10000, // 10 second timeout
             headers: {
@@ -500,181 +491,6 @@ async function getUseZoracleAddress(userId): Promise<string | null> {
 }
 
 /**
- * Quick unlock wallet with PIN
- * @param {string} userId - Telegram user ID
- * @param {string} pin - User's PIN
- * @returns {Object} - Result object
- */
-async function quickUnlockWallet(userId, pin): Promise<any> {
-  try {
-    // Check if wallet file exists
-    const walletFile = path.join(WALLETS_DIR, `${userId}.json`);
-    if (!fs.existsSync(walletFile)) {
-      return {
-        success: false,
-        message: "No wallet found for this user. Please create a wallet first.",
-      };
-    }
-
-    // Read wallet data
-    const walletData = JSON.parse(fs.readFileSync(walletFile, "utf8"));
-
-    // Use default PIN if empty
-    const defaultPin = pin || "1234";
-
-    // Verify PIN
-    const pinHash = crypto
-      .createHash("sha256")
-      .update(defaultPin + walletData.pinSalt)
-      .digest("hex");
-    if (pinHash !== walletData.pinHash) {
-      // Track failed attempts
-      incrementFailedAttempt(userId);
-      return {
-        success: false,
-        message: "Incorrect PIN",
-        remainingAttempts:
-          CONFIG.PASSWORD_ATTEMPTS_MAX - getFailedAttempts(userId),
-      };
-    }
-
-    // Reset failed attempts
-    resetFailedAttempts(userId);
-
-    // Set wallet as unlocked in session
-    walletSessions.set(userId, {
-      accountName: `zoracle-${userId}`,
-      address: walletData.address,
-      unlockTime: Date.now(),
-      lastActivity: Date.now(),
-    });
-
-    return {
-      success: true,
-      address: walletData.address,
-      message: "Wallet unlocked successfully with PIN",
-    };
-  } catch (error) {
-    console.error("Error unlocking wallet with PIN:", error);
-    return {
-      success: false,
-      message: "Failed to unlock wallet: " + error.message,
-    };
-  }
-}
-
-/**
- * Load wallet with password
- * @param {string} userId - Telegram user ID
- * @param {string} password - User's password
- * @param {string} twoFAToken - Optional 2FA token
- * @returns {Object} - Result object
- */
-async function loadWallet(userId, password, twoFAToken = null): Promise<any> {
-  try {
-    // Check if wallet file exists
-    const walletFile = path.join(WALLETS_DIR, `${userId}.json`);
-    if (!fs.existsSync(walletFile)) {
-      return {
-        success: false,
-        message: "No wallet found for this user. Please create a wallet first.",
-      };
-    }
-
-    // Read wallet data
-    const walletData = JSON.parse(fs.readFileSync(walletFile, "utf8"));
-
-    // Check if account is locked due to too many failed attempts
-    if (getFailedAttempts(userId) >= CONFIG.PASSWORD_ATTEMPTS_MAX) {
-      return {
-        success: false,
-        message:
-          "Account locked due to too many failed attempts. Please wait or reset your password.",
-      };
-    }
-
-    try {
-      // Use default password if empty
-      const defaultPassword = password || "default_password_123";
-
-      // Derive key from password and salt
-      const key = crypto.scryptSync(defaultPassword, walletData.salt, 32);
-      const iv = Buffer.from(walletData.iv, "hex");
-
-      // Decrypt wallet ID
-      const decipher = crypto.createDecipheriv("aes-256-cbc", key, iv);
-      let walletId = decipher.update(
-        walletData.encryptedWalletId,
-        "hex",
-        "utf8"
-      );
-      walletId += decipher.final("utf8");
-
-      console.log(`Successfully decrypted wallet ID: ${walletId}`);
-
-      // Reset failed attempts
-      resetFailedAttempts(userId);
-
-      // Check 2FA token if provided
-      if (twoFAToken) {
-        console.log(`Validating 2FA token for user ${userId}`);
-
-        if (twoFAToken !== "valid-token" && !SIMULATION_MODE) {
-          return {
-            success: false,
-            message: "Invalid 2FA token",
-            requiresTwoFA: true,
-          };
-        }
-      }
-
-      // In simulation mode or real mode, store in session
-      const accountName = `zoracle-${userId}`;
-      walletSessions.set(userId, {
-        walletId,
-        accountName,
-        address: walletData.address,
-        unlockTime: Date.now(),
-        lastActivity: Date.now(),
-      });
-
-      if (!SIMULATION_MODE) {
-        // For real mode, verify the account exists in UseZoracle API
-        try {
-          await axios.get(`${API_BASE_URL}/api/balances/${accountName}`);
-        } catch (error) {
-          console.warn(
-            `Could not verify account ${accountName} with UseZoracle API: ${error.message}`
-          );
-          // We'll proceed anyway, assuming the account exists
-        }
-      }
-
-      return {
-        success: true,
-        address: walletData.address,
-        message: "Wallet unlocked successfully",
-      };
-    } catch (error) {
-      // Password incorrect or API error
-      incrementFailedAttempt(userId);
-      return {
-        success: false,
-        message: "Incorrect password or API error",
-        remainingAttempts:
-          CONFIG.PASSWORD_ATTEMPTS_MAX - getFailedAttempts(userId),
-      };
-    }
-  } catch (error) {
-    console.error("Error loading wallet:", error);
-    return {
-      success: false,
-      message: "Failed to load wallet: " + error.message,
-    };
-  }
-}
-
-/**
  * Get wallet balances
  * @param {string} userId - Telegram user ID
  * @returns {Promise<Object>} - Balance information
@@ -690,15 +506,7 @@ async function getWalletBalances(userId): Promise<any> {
       };
     }
 
-    // Check if wallet is unlocked
-    if (!isWalletUnlocked(userId)) {
-      return {
-        success: false,
-        message: "Wallet is locked. Please unlock your wallet first.",
-      };
-    }
-
-    const session = walletSessions.get(userId);
+    const accountName = `zoracle-${userId}`;
 
     if (SIMULATION_MODE) {
       // Return simulated balances in simulation mode
@@ -717,11 +525,11 @@ async function getWalletBalances(userId): Promise<any> {
       // Use real UseZoracle API
       try {
         console.log(
-          `Getting real balances from UseZoracle API for account: ${session.accountName}`
+          `Getting real balances from UseZoracle API for account: ${accountName}`
         );
 
         const response = await axios.get(
-          `${API_BASE_URL}/api/balances/${session.accountName}`
+          `${API_BASE_URL}/api/balances/${accountName}`
         );
 
         if (!response.data || !response.data.success || !response.data.data) {
@@ -781,15 +589,7 @@ async function getTokenBalance(userId, tokenAddress): Promise<any> {
       };
     }
 
-    // Check if wallet is unlocked
-    if (!isWalletUnlocked(userId)) {
-      return {
-        success: false,
-        message: "Wallet is locked. Please unlock your wallet first.",
-      };
-    }
-
-    const session = walletSessions.get(userId);
+    const accountName = `zoracle-${userId}`;
 
     if (SIMULATION_MODE) {
       // Return simulated token balance in simulation mode
@@ -816,7 +616,7 @@ async function getTokenBalance(userId, tokenAddress): Promise<any> {
         );
 
         const response = await axios.get(
-          `${API_BASE_URL}/api/balances/${session.accountName}`
+          `${API_BASE_URL}/api/balances/${accountName}`
         );
 
         if (
@@ -899,13 +699,6 @@ async function transferTokens(
   network = "base"
 ): Promise<any> {
   try {
-    if (!isWalletUnlocked(userId)) {
-      return {
-        success: false,
-        message: "Wallet is locked. Please unlock your wallet first.",
-      };
-    }
-
     // Validate destination address
     if (!isValidEthereumAddress(toAddress)) {
       return {
@@ -914,7 +707,7 @@ async function transferTokens(
       };
     }
 
-    const session = walletSessions.get(userId);
+    const accountName = `zoracle-${userId}`;
 
     if (SIMULATION_MODE) {
       // Simulate transaction in simulation mode
@@ -942,7 +735,7 @@ async function transferTokens(
         );
 
         const transferData = {
-          accountName: session.accountName,
+          accountName: accountName,
           to: toAddress,
           amount: amount,
           token: token.toLowerCase(),
@@ -986,73 +779,6 @@ async function transferTokens(
       message: `Failed to transfer tokens: ${error.message}`,
     };
   }
-}
-
-/**
- * Lock wallet and clear session
- * @param {string} userId - Telegram user ID
- * @returns {boolean} - True if wallet was locked
- */
-function lockWallet(userId): boolean {
-  walletSessions.delete(userId);
-  return true;
-}
-
-/**
- * Check if wallet is unlocked
- * @param {string} userId - Telegram user ID
- * @returns {boolean} - True if wallet is unlocked
- */
-function isWalletUnlocked(userId): boolean {
-  // Check if wallet exists in session
-  if (!walletSessions.has(userId)) {
-    return false;
-  }
-
-  // Check if session has expired
-  const session = walletSessions.get(userId);
-  const inactiveTime = (Date.now() - session.lastActivity) / (60 * 1000); // in minutes
-
-  if (inactiveTime > CONFIG.WALLET_LOCK_TIMEOUT) {
-    // Lock wallet due to inactivity
-    lockWallet(userId);
-    return false;
-  }
-
-  // Update activity
-  walletSessions.get(userId).lastActivity = Date.now();
-  return true;
-}
-
-/**
- * Increment failed attempt counter
- * @param {string} userId - Telegram user ID
- */
-function incrementFailedAttempt(userId): void {
-  const attempts = failedAttempts.get(userId) || 0;
-  failedAttempts.set(userId, attempts + 1);
-
-  // Lock account after max attempts
-  if (attempts + 1 >= CONFIG.PASSWORD_ATTEMPTS_MAX) {
-    lockWallet(userId);
-  }
-}
-
-/**
- * Get number of failed attempts
- * @param {string} userId - Telegram user ID
- * @returns {number} - Number of failed attempts
- */
-function getFailedAttempts(userId): number {
-  return failedAttempts.get(userId) || 0;
-}
-
-/**
- * Reset failed attempts counter
- * @param {string} userId - Telegram user ID
- */
-function resetFailedAttempts(userId): void {
-  failedAttempts.delete(userId);
 }
 
 /**
@@ -1159,24 +885,10 @@ async function importWalletFromMnemonic(
   }
 }
 
-// Automatic wallet locking system
-setInterval(() => {
-  for (const [userId, session] of walletSessions.entries()) {
-    const inactiveTime = (Date.now() - session.lastActivity) / (60 * 1000); // in minutes
-    if (inactiveTime > CONFIG.WALLET_LOCK_TIMEOUT) {
-      console.log(`Auto-locking wallet for user ${userId} due to inactivity`);
-      lockWallet(userId);
-    }
-  }
-}, 60000); // Check every minute
-
 export {
   createWallet,
   importWallet,
   importWalletFromMnemonic,
-  loadWallet,
-  lockWallet,
-  isWalletUnlocked,
   userHasWallet,
   getWallet,
   getWalletAddress,
@@ -1185,7 +897,6 @@ export {
   getWalletBalances,
   getTokenBalance,
   transferTokens,
-  quickUnlockWallet,
   get2FAQRCode,
   enable2FA,
   isValidEthereumAddress,

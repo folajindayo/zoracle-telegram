@@ -123,7 +123,7 @@ export async function handleShowPortfolio(
     console.error("Error displaying portfolio:", error);
     bot.sendMessage(
       chatId,
-      `❌ An error occurred while loading your portfolio: ${error.message}`,
+      `❌ Error loading portfolio. Please try again later.`,
       {
         reply_markup: {
           inline_keyboard: [
@@ -154,25 +154,13 @@ export async function handleShowTransactions(
       return;
     }
 
-    // Auto-unlock wallet if needed
-    if (!walletManager.isWalletUnlocked(userId)) {
-      const unlockResult = await walletManager.loadWallet(userId, "");
-      if (!unlockResult.success) {
-        bot.sendMessage(
-          chatId,
-          `❌ Failed to unlock wallet: ${unlockResult.message}`
-        );
-        return;
-      }
-    }
-
     // Get UseZoracle API wallet address
     const address = await walletManager.getUseZoracleAddress(userId);
 
     if (!address) {
       bot.sendMessage(
         chatId,
-        "❌ Unable to get wallet address. Please make sure your wallet is unlocked."
+        "❌ Unable to get wallet address. Please try again later."
       );
       return;
     }
@@ -295,18 +283,6 @@ export async function handleRefreshHistory(
       return;
     }
 
-    // Auto-unlock wallet if needed
-    if (!walletManager.isWalletUnlocked(userId)) {
-      const unlockResult = await walletManager.loadWallet(userId, "");
-      if (!unlockResult.success) {
-        bot.sendMessage(
-          chatId,
-          `❌ Failed to unlock wallet: ${unlockResult.message}`
-        );
-        return;
-      }
-    }
-
     // Clear address cache to force fresh API call
     walletManager.clearAddressCache(userId);
 
@@ -316,7 +292,7 @@ export async function handleRefreshHistory(
     if (!address) {
       bot.sendMessage(
         chatId,
-        "❌ Unable to get wallet address. Please make sure your wallet is unlocked."
+        "❌ Unable to get wallet address. Please try again later."
       );
       return;
     }

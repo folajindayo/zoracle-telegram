@@ -99,7 +99,7 @@ const helpMessage = `
 /help - Show this help menu
 
 <b>🔐 Wallet Management:</b>
-/wallet - Manage your wallet (create, import, unlock)
+/wallet - Manage your wallet (create, import)
 /portfolio - View your portfolio and balances
 /history - View transaction history
 
@@ -283,26 +283,32 @@ bot.onText(/^\/start(?:\s+(.+))?$/, async (msg, match) => {
   } else {
     // Check if user already exists in database
     if (existingUser) {
-      console.log(
-        `👋 Welcome back user ${userId}! Going straight to main menu.`
-      );
+      console.log(`👋 Welcome back user ${userId}!`);
 
-      // For existing users, only auto-unlock if they have a wallet
+      // For existing users, check if they have a wallet
       const walletManager = await import("../services/cdpWallet");
       if (walletManager.userHasWallet(chatId.toString())) {
-        try {
-          const result = await walletManager.loadWallet(chatId.toString(), "");
-          if (result.success) {
-            console.log(`✅ Wallet unlocked for returning user ${userId}`);
-          }
-        } catch (error) {
-          console.error("Error auto-unlocking wallet:", error);
+        console.log(`✅ Returning user ${userId} has a wallet`);
+
+        // Get and display the wallet address
+        const walletAddress = walletManager.getWalletAddress(chatId.toString());
+        if (walletAddress) {
+          bot.sendMessage(
+            chatId,
+            `👋 <b>Welcome back!</b>\n\nYour wallet address: <code>${walletAddress}</code>\n\nYour wallet is ready to use!`,
+            { parse_mode: "HTML" as const }
+          );
         }
       } else {
         console.log(`ℹ️ Returning user ${userId} doesn't have a wallet yet`);
+        bot.sendMessage(
+          chatId,
+          "You don't have a wallet set up yet. Let's create one for you!",
+          { parse_mode: "HTML" as const }
+        );
       }
 
-      // Go straight to main menu for returning users (no welcome message)
+      // Go straight to main menu for returning users
       conversationStates.set(chatId, walletHandlers.STATES.COMPLETE);
       await showMainMenu(chatId);
       return;
@@ -425,6 +431,203 @@ bot.onText(/^\/start(?:\s+(.+))?$/, async (msg, match) => {
   }
 });
 
+// Handle commands
+bot.onText(/\/start/, async (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id.toString();
+  const text = msg.text;
+
+  console.log(
+    `🚀 /start command received from user ${userId} in chat ${chatId}`
+  );
+
+  // Check if user already exists in database
+  const { UserOps } = await import("../database/operations");
+  const existingUser = await UserOps.getUser(userId);
+
+  if (existingUser) {
+    console.log(`👋 Welcome back user ${userId}!`);
+
+    // For existing users, check if they have a wallet
+    const walletManager = await import("../services/cdpWallet");
+    if (walletManager.userHasWallet(chatId.toString())) {
+      console.log(`✅ Returning user ${userId} has a wallet`);
+
+      // Get and display the wallet address
+      const walletAddress = walletManager.getWalletAddress(chatId.toString());
+      if (walletAddress) {
+        bot.sendMessage(
+          chatId,
+          `👋 <b>Welcome back!</b>\n\nYour wallet address: <code>${walletAddress}</code>\n\nYour wallet is ready to use!`,
+          { parse_mode: "HTML" as const }
+        );
+      }
+    } else {
+      console.log(`ℹ️ Returning user ${userId} doesn't have a wallet yet`);
+      bot.sendMessage(
+        chatId,
+        "You don't have a wallet set up yet. Let's create one for you!",
+        { parse_mode: "HTML" as const }
+      );
+    }
+
+    // Go straight to main menu for returning users
+    conversationStates.set(chatId, walletHandlers.STATES.COMPLETE);
+    await showMainMenu(chatId);
+    return;
+  }
+
+  // New user - automatically create wallet silently
+  console.log(
+    `🆕 New user ${userId} detected. Creating wallet automatically...`
+  );
+
+  try {
+    const walletManager = await import("../services/cdpWallet");
+    const result = await walletManager.createWallet(userId, "", "");
+
+    if (result.success) {
+      // Mark user as setup complete in database
+      try {
+        await UserOps.upsertUser(userId, { setupComplete: true });
+        console.log(
+          `✅ Marked user ${userId} as setup complete after automatic wallet creation`
+        );
+      } catch (error) {
+        console.error(`❌ Failed to mark user as setup complete: ${error}`);
+      }
+
+      console.log(
+        `✅ Wallet created automatically for new user ${userId}: ${result.address}`
+      );
+
+      // Show welcome message with wallet info
+      const welcomeMsg = await walletHandlers.getWelcomeMessage(userId);
+      bot.sendMessage(
+        chatId,
+        welcomeMsg +
+          `\n\n✅ <b>Wallet Created Successfully!</b>\n\nAddress: <code>${result.address}</code>\n\nYour wallet is ready to use!`,
+        { parse_mode: "HTML" as const }
+      );
+
+      // Show mnemonic if created new wallet
+      if (result.mnemonic) {
+        bot.sendMessage(
+          chatId,
+          `🔐 <b>IMPORTANT: Save Your Recovery Phrase</b>\n\n<code>${result.mnemonic}</code>\n\n⚠️ <b>NEVER share this with anyone!</b> Write it down and keep it in a safe place.`,
+          { parse_mode: "HTML" as const }
+        );
+      }
+
+      // Set conversation state and show main menu
+      conversationStates.set(chatId, walletHandlers.STATES.COMPLETE);
+      await showMainMenu(chatId);
+    } else {
+      console.error(
+        `❌ Failed to create wallet for new user ${userId}: ${result.message}`
+      );
+
+      // Fallback to manual setup if automatic creation fails
+      const setupOptions = {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🔑 Create New Wallet", callback_data: "wallet_create" }],
+            [
+              {
+                text: "📥 Import Existing Wallet",
+                callback_data: "wallet_import",
+              },
+            ],
+            [{ text: "❓ Help", callback_data: "show_help" }],
+          ],
+        },
+        parse_mode: "HTML" as const,
+      };
+
+      const welcomeMsg = await walletHandlers.getWelcomeMessage(userId);
+      bot.sendMessage(
+        chatId,
+        welcomeMsg +
+          `<code>${chatId}</code>\n\nLet's get started by setting up your wallet:`,
+        setupOptions
+      );
+    }
+  } catch (error) {
+    console.error(`❌ Error in /start command: ${error}`);
+    bot.sendMessage(
+      chatId,
+      "❌ An error occurred while starting the bot. Please try again."
+    );
+  }
+});
+
+bot.onText(/\/help/, async (msg) => {
+  const chatId = msg.chat.id;
+  console.log(`📚 /help command received in chat ${chatId}`);
+  bot.sendMessage(chatId, escapeMarkdownPreserveFormat(helpMessage), {
+    parse_mode: "MarkdownV2" as const,
+  });
+});
+
+bot.onText(/\/wallet/, async (msg) => {
+  const chatId = msg.chat.id;
+  console.log(`🔐 /wallet command received in chat ${chatId}`);
+  await walletHandlers.handleWalletCreate(
+    bot,
+    chatId,
+    conversationStates,
+    users
+  );
+});
+
+bot.onText(/\/portfolio/, async (msg) => {
+  const chatId = msg.chat.id;
+  console.log(`💰 /portfolio command received in chat ${chatId}`);
+  await portfolioHandlers.handleShowPortfolio(bot, chatId, users);
+});
+
+bot.onText(/\/trade/, async (msg) => {
+  const chatId = msg.chat.id;
+  console.log(`🔄 /trade command received in chat ${chatId}`);
+  await tradeHandlers.handleShowTradeOptions(bot, chatId, null);
+});
+
+bot.onText(/\/sniper/, async (msg) => {
+  const chatId = msg.chat.id;
+  console.log(`🎯 /sniper command received in chat ${chatId}`);
+  await tradeHandlers.handleShowTradeOptions(bot, chatId, null);
+});
+
+bot.onText(/\/history/, async (msg) => {
+  const chatId = msg.chat.id;
+  console.log(`📊 /history command received in chat ${chatId}`);
+  await portfolioHandlers.handleShowTransactions(bot, chatId, null);
+});
+
+bot.onText(/\/alerts/, async (msg) => {
+  const chatId = msg.chat.id;
+  console.log(`🔔 /alerts command received in chat ${chatId}`);
+  bot.sendMessage(
+    chatId,
+    "🔔 <b>Price Alerts</b>\n\nThis feature is coming soon!"
+  );
+});
+
+bot.onText(/\/discover/, async (msg) => {
+  const chatId = msg.chat.id;
+  console.log(`🔍 /discover command received in chat ${chatId}`);
+  bot.sendMessage(
+    chatId,
+    "🔍 <b>Token Discovery</b>\n\nThis feature is coming soon!"
+  );
+});
+
+bot.onText(/\/settings/, async (msg) => {
+  const chatId = msg.chat.id;
+  console.log(`⚙️ /settings command received in chat ${chatId}`);
+  bot.sendMessage(chatId, "⚙️ <b>Settings</b>\n\nThis feature is coming soon!");
+});
+
 // Handle callback queries (button clicks)
 bot.on("callback_query", async (callbackQuery) => {
   const chatId = callbackQuery.message.chat.id;
@@ -466,18 +669,6 @@ bot.on("callback_query", async (callbackQuery) => {
 
     case "import_seed":
       await walletHandlers.handleImportSeed(bot, chatId, conversationStates);
-      break;
-
-    case "wallet_unlock":
-      await walletHandlers.handleWalletUnlock(bot, chatId, conversationStates);
-      break;
-
-    case "wallet_quick_unlock":
-      await walletHandlers.handleWalletQuickUnlock(
-        bot,
-        chatId,
-        conversationStates
-      );
       break;
 
     case "enable_2fa":
@@ -676,62 +867,6 @@ bot.on("message", async (msg) => {
       } catch (error) {
         console.error("Error importing wallet:", error);
         bot.sendMessage(chatId, `❌ Error importing wallet: ${error.message}`);
-      }
-      break;
-
-    case "AWAITING_PASSWORD":
-      // Handle wallet unlock (no password required)
-      try {
-        const walletManager = await import("../services/cdpWallet");
-        const result = await walletManager.loadWallet(userId, "");
-
-        if (result.success) {
-          bot.sendMessage(
-            chatId,
-            "✅ <b>Wallet unlocked successfully!</b>\n\nYour wallet is now unlocked and ready to use.",
-            {
-              parse_mode: "HTML" as const,
-            }
-          );
-          conversationStates.set(chatId, walletHandlers.STATES.COMPLETE);
-          await showMainMenu(chatId);
-        } else {
-          bot.sendMessage(
-            chatId,
-            `❌ Failed to unlock wallet: ${result.message}`
-          );
-        }
-      } catch (error) {
-        console.error("Error unlocking wallet:", error);
-        bot.sendMessage(chatId, `❌ Error unlocking wallet: ${error.message}`);
-      }
-      break;
-
-    case "AWAITING_PIN":
-      // Handle wallet unlock (no PIN required)
-      try {
-        const walletManager = await import("../services/cdpWallet");
-        const result = await walletManager.quickUnlockWallet(userId, "");
-
-        if (result.success) {
-          bot.sendMessage(
-            chatId,
-            "✅ <b>Wallet unlocked successfully!</b>\n\nYour wallet is now unlocked and ready to use.",
-            {
-              parse_mode: "HTML" as const,
-            }
-          );
-          conversationStates.set(chatId, walletHandlers.STATES.COMPLETE);
-          await showMainMenu(chatId);
-        } else {
-          bot.sendMessage(
-            chatId,
-            `❌ Failed to unlock wallet: ${result.message}`
-          );
-        }
-      } catch (error) {
-        console.error("Error unlocking wallet:", error);
-        bot.sendMessage(chatId, `❌ Error unlocking wallet: ${error.message}`);
       }
       break;
 

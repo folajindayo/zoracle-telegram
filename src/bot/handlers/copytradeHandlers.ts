@@ -104,18 +104,6 @@ module.exports = (bot, users) => {
       return;
     }
 
-    // Auto-unlock wallet if needed
-    if (!walletManager.isWalletUnlocked(userId)) {
-      const unlockResult = await walletManager.loadWallet(userId, "");
-      if (!unlockResult.success) {
-        bot.sendMessage(
-          chatId,
-          `❌ Failed to unlock wallet: ${unlockResult.message}`
-        );
-        return;
-      }
-    }
-
     // Start copy-trade setup flow
     copyTradeStates.set(userId, { state: COPYTRADE_STATES.AWAITING_WALLET });
 
@@ -140,18 +128,6 @@ module.exports = (bot, users) => {
         "You don't have a wallet set up yet. Use /wallet to set up a wallet."
       );
       return;
-    }
-
-    // Auto-unlock wallet if needed
-    if (!walletManager.isWalletUnlocked(userId)) {
-      const unlockResult = await walletManager.loadWallet(userId, "");
-      if (!unlockResult.success) {
-        bot.sendMessage(
-          chatId,
-          `❌ Failed to unlock wallet: ${unlockResult.message}`
-        );
-        return;
-      }
     }
 
     // Validate wallet address
@@ -189,18 +165,6 @@ module.exports = (bot, users) => {
         "You don't have a wallet set up yet. Use /wallet to set up a wallet."
       );
       return;
-    }
-
-    // Auto-unlock wallet if needed
-    if (!walletManager.isWalletUnlocked(userId)) {
-      const unlockResult = await walletManager.loadWallet(userId, "");
-      if (!unlockResult.success) {
-        bot.sendMessage(
-          chatId,
-          `❌ Failed to unlock wallet: ${unlockResult.message}`
-        );
-        return;
-      }
     }
 
     try {

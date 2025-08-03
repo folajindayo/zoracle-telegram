@@ -329,74 +329,6 @@ async function get2FAQRCode(userId): Promise<any> {
 }
 
 /**
- * Load and decrypt wallet with PIN
- * @param {string} userId - Telegram user ID
- * @param {string} pin - PIN for quick access
- * @returns {Object} - Wallet object or error
- */
-async function quickUnlockWallet(userId, pin): Promise<any> {
-  try {
-    // Check if wallet file exists
-    const walletFile = path.join(WALLETS_DIR, `${userId}.json`);
-    if (!fs.existsSync(walletFile)) {
-      return {
-        success: false,
-        message:
-          "No wallet found for this user. Please create or import a wallet first.",
-      };
-    }
-
-    // Read wallet data
-    const walletData = JSON.parse(fs.readFileSync(walletFile, "utf8"));
-
-    // Verify PIN
-    const pinHash = crypto
-      .createHash("sha256")
-      .update(pin + walletData.pinSalt)
-      .digest("hex");
-    if (pinHash !== walletData.pinHash) {
-      // Track failed attempts
-      incrementFailedAttempt(userId);
-
-      return {
-        success: false,
-        message: "Incorrect PIN",
-        remainingAttempts:
-          CONFIG.PASSWORD_ATTEMPTS_MAX - getFailedAttempts(userId),
-      };
-    }
-
-    // If 2FA is enabled, require token
-    if (walletData.twoFactorEnabled) {
-      return {
-        success: false,
-        requireTwoFactor: true,
-        message: "Please enter your 2FA token to unlock wallet",
-      };
-    }
-
-    // Reset failed attempts counter
-    resetFailedAttempts(userId);
-
-    // Load actual wallet with password (to be implemented in a secure way)
-    // For now, we'll assume the wallet is already unlocked or store password in session
-    // This is just a placeholder for the PIN-based quick access flow
-
-    return {
-      success: true,
-      address: walletData.address,
-      message: "Wallet unlocked successfully with PIN",
-    };
-  } catch (error) {
-    console.error("Error unlocking wallet with PIN:", error);
-    return {
-      success: false,
-      message: "Failed to unlock wallet: " + error.message,
-    };
-  }
-}
-
-/**
  * Verify 2FA token for a sensitive action
  * @param {string} userId - Telegram user ID
  * @param {string} token - 2FA token
@@ -482,128 +414,6 @@ function getFailedAttempts(userId): any {
  */
 function resetFailedAttempts(userId): any {
   failedAttempts.delete(userId);
-}
-
-/**
- * Load and decrypt wallet
- * @param {string} userId - Telegram user ID
- * @param {string} password - Password for decryption
- * @param {string} twoFactorToken - Optional 2FA token
- * @returns {Object} - Wallet object or error
- */
-async function loadWallet(
-  userId,
-  password,
-  twoFactorToken = null
-): Promise<any> {
-  try {
-    // Check if wallet file exists
-    const walletFile = path.join(WALLETS_DIR, `${userId}.json`);
-    if (!fs.existsSync(walletFile)) {
-      return {
-        success: false,
-        message:
-          "No wallet found for this user. Please create or import a wallet first.",
-      };
-    }
-
-    // Read wallet data
-    const walletData = JSON.parse(fs.readFileSync(walletFile, "utf8"));
-
-    // Check if account is locked due to too many failed attempts
-    if (getFailedAttempts(userId) >= CONFIG.PASSWORD_ATTEMPTS_MAX) {
-      return {
-        success: false,
-        message:
-          "Account locked due to too many failed attempts. Please wait or reset your password.",
-      };
-    }
-
-    // Derive key from password and salt
-    const key = crypto.scryptSync(password, walletData.salt, 32);
-    const iv = Buffer.from(walletData.iv, "hex");
-
-    // Decrypt private key
-    const decipher = crypto.createDecipheriv("aes-256-cbc", key, iv);
-    let privateKey = decipher.update(
-      walletData.encryptedPrivateKey,
-      "hex",
-      "utf8"
-    );
-    privateKey += decipher.final("utf8");
-
-    // Verify the key hash
-    const keyHash = crypto
-      .createHash("sha256")
-      .update(privateKey)
-      .digest("hex");
-    if (keyHash !== walletData.keyHash) {
-      incrementFailedAttempt(userId);
-      return {
-        success: false,
-        message: "Incorrect password",
-        remainingAttempts:
-          CONFIG.PASSWORD_ATTEMPTS_MAX - getFailedAttempts(userId),
-      };
-    }
-
-    // Check if 2FA is enabled and verify token if needed
-    if (walletData.twoFactorEnabled) {
-      // If no token provided, prompt for it
-      if (!twoFactorToken) {
-        return {
-          success: false,
-          requireTwoFactor: true,
-          message: "Please provide your 2FA token to unlock wallet",
-        };
-      }
-
-      // Verify 2FA token
-      const verified = speakeasy.totp.verify({
-        secret: walletData.twoFactorSecret,
-        encoding: "base32",
-        token: twoFactorToken,
-        window: 1, // Allow 1 period before/after for clock drift
-      });
-
-      if (!verified) {
-        return {
-          success: false,
-          requireTwoFactor: true,
-          message: "Invalid 2FA token. Please try again.",
-        };
-      }
-    }
-
-    // Reset failed attempts
-    resetFailedAttempts(userId);
-
-    // Create wallet
-    const wallet = new ethers.Wallet(privateKey, provider);
-
-    // Update activity timestamp
-    walletActivity.set(userId, Date.now());
-
-    // Store in session
-    walletSessions.set(userId, {
-      wallet,
-      address: wallet.address,
-      unlockTime: Date.now(),
-      lastActivity: Date.now(),
-    });
-
-    return {
-      success: true,
-      address: wallet.address,
-      message: "Wallet unlocked successfully",
-    };
-  } catch (error) {
-    console.error("Error loading wallet:", error);
-    return {
-      success: false,
-      message: "Failed to load wallet: " + error.message,
-    };
-  }
 }
 
 /**
@@ -794,30 +604,14 @@ async function getTokenBalance(userId, tokenAddress): Promise<any> {
   }
 }
 
-// Automatic wallet locking system
-setInterval(() => {
-  for (const [userId, session] of walletSessions.entries()) {
-    const inactiveTime = (Date.now() - session.lastActivity) / (60 * 1000); // in minutes
-    if (inactiveTime > CONFIG.WALLET_LOCK_TIMEOUT) {
-      console.log(`Auto-locking wallet for user ${userId} due to inactivity`);
-      lockWallet(userId);
-    }
-  }
-}, 60000); // Check every minute
-
 export {
   createWallet,
   importWallet,
   importWalletFromMnemonic,
-  loadWallet,
-  lockWallet,
-  isWalletUnlocked,
-  getUnlockedWallet,
   userHasWallet,
   getWalletAddress,
   getWalletBalances,
   getTokenBalance,
-  quickUnlockWallet,
   enable2FA,
   verify2FAToken,
   get2FAQRCode,
