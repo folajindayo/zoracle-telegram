@@ -1,193 +1,215 @@
 /**
  * MongoDB Models
- * 
+ *
  * This file defines the MongoDB schemas and models using Mongoose.
  */
-import * as mongoose from 'mongoose';
+import * as mongoose from "mongoose";
 const { Schema } = mongoose;
 
 // User Schema
-const UserSchema = new Schema({
-  telegramId: {
-    type: String,
-    required: true,
-    unique: true
+const UserSchema = new Schema(
+  {
+    telegramId: {
+      type: String,
+      required: true,
+      unique: true,
+    },
+    username: {
+      type: String,
+    },
+    walletAddress: {
+      type: String,
+    },
+    encryptedPrivateKey: {
+      type: String,
+    },
+    pin: {
+      type: String,
+    },
+    twoFactorEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    twoFactorSecret: {
+      type: String,
+    },
+    lastActive: {
+      type: Date,
+      default: Date.now,
+    },
+    language: {
+      type: String,
+      default: "en",
+      enum: ["en", "es", "fr", "de", "it", "pt", "ru", "zh", "ja", "ko"],
+    },
+    setupComplete: {
+      type: Boolean,
+      default: false,
+    },
+    privateKey: {
+      type: String,
+    },
   },
-  username: {
-    type: String
-  },
-  walletAddress: {
-    type: String
-  },
-  encryptedPrivateKey: {
-    type: String
-  },
-  pin: {
-    type: String
-  },
-  twoFactorEnabled: {
-    type: Boolean,
-    default: false
-  },
-  twoFactorSecret: {
-    type: String
-  },
-  lastActive: {
-    type: Date,
-    default: Date.now
-  },
-  language: {
-    type: String,
-    default: 'en',
-    enum: ['en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'zh', 'ja', 'ko']
-  }
-}, { timestamps: true });
+  { timestamps: true }
+);
 
 // Transaction Schema
-const TransactionSchema = new Schema({
-  telegramId: {
-    type: String,
-    required: true,
-    ref: 'User'
+const TransactionSchema = new Schema(
+  {
+    telegramId: {
+      type: String,
+      required: true,
+      ref: "User",
+    },
+    type: {
+      type: String,
+      required: true,
+      enum: ["buy", "sell", "approve", "transfer"],
+    },
+    tokenAddress: {
+      type: String,
+      required: true,
+    },
+    tokenSymbol: {
+      type: String,
+    },
+    amount: {
+      type: String,
+      required: true,
+    },
+    ethValue: {
+      type: String,
+    },
+    txHash: {
+      type: String,
+    },
+    status: {
+      type: String,
+      default: "pending",
+      enum: ["pending", "confirmed", "failed"],
+    },
+    timestamp: {
+      type: Date,
+      default: Date.now,
+    },
+    gasUsed: {
+      type: String,
+    },
+    gasPrice: {
+      type: String,
+    },
   },
-  type: {
-    type: String,
-    required: true,
-    enum: ['buy', 'sell', 'approve', 'transfer']
-  },
-  tokenAddress: {
-    type: String,
-    required: true
-  },
-  tokenSymbol: {
-    type: String
-  },
-  amount: {
-    type: String,
-    required: true
-  },
-  ethValue: {
-    type: String
-  },
-  txHash: {
-    type: String
-  },
-  status: {
-    type: String,
-    default: 'pending',
-    enum: ['pending', 'confirmed', 'failed']
-  },
-  timestamp: {
-    type: Date,
-    default: Date.now
-  },
-  gasUsed: {
-    type: String
-  },
-  gasPrice: {
-    type: String
-  }
-}, { timestamps: true });
+  { timestamps: true }
+);
 
 // Alert Schema
-const AlertSchema = new Schema({
-  telegramId: {
-    type: String,
-    required: true,
-    ref: 'User'
+const AlertSchema = new Schema(
+  {
+    telegramId: {
+      type: String,
+      required: true,
+      ref: "User",
+    },
+    tokenAddress: {
+      type: String,
+      required: true,
+    },
+    tokenSymbol: {
+      type: String,
+    },
+    type: {
+      type: String,
+      required: true,
+      enum: ["price_above", "price_below", "liquidity_change"],
+    },
+    threshold: {
+      type: String,
+      required: true,
+    },
+    active: {
+      type: Boolean,
+      default: true,
+    },
+    lastTriggered: {
+      type: Date,
+    },
   },
-  tokenAddress: {
-    type: String,
-    required: true
-  },
-  tokenSymbol: {
-    type: String
-  },
-  type: {
-    type: String,
-    required: true,
-    enum: ['price_above', 'price_below', 'liquidity_change']
-  },
-  threshold: {
-    type: String,
-    required: true
-  },
-  active: {
-    type: Boolean,
-    default: true
-  },
-  lastTriggered: {
-    type: Date
-  }
-}, { timestamps: true });
+  { timestamps: true }
+);
 
 // CopyTrade Schema
-const CopyTradeSchema = new Schema({
-  telegramId: {
-    type: String,
-    required: true,
-    ref: 'User'
+const CopyTradeSchema = new Schema(
+  {
+    telegramId: {
+      type: String,
+      required: true,
+      ref: "User",
+    },
+    targetWallet: {
+      type: String,
+      required: true,
+    },
+    maxEthPerTrade: {
+      type: String,
+      required: true,
+    },
+    slippage: {
+      type: Number,
+      default: 2.0,
+    },
+    active: {
+      type: Boolean,
+      default: true,
+    },
+    sandboxMode: {
+      type: Boolean,
+      default: true,
+    },
   },
-  targetWallet: {
-    type: String,
-    required: true
-  },
-  maxEthPerTrade: {
-    type: String,
-    required: true
-  },
-  slippage: {
-    type: Number,
-    default: 2.0
-  },
-  active: {
-    type: Boolean,
-    default: true
-  },
-  sandboxMode: {
-    type: Boolean,
-    default: true
-  }
-}, { timestamps: true });
+  { timestamps: true }
+);
 
 // Token Schema
-const TokenSchema = new Schema({
-  address: {
-    type: String,
-    required: true,
-    unique: true
+const TokenSchema = new Schema(
+  {
+    address: {
+      type: String,
+      required: true,
+      unique: true,
+    },
+    name: {
+      type: String,
+    },
+    symbol: {
+      type: String,
+    },
+    decimals: {
+      type: Number,
+      default: 18,
+    },
+    lastPrice: {
+      type: String,
+    },
+    priceUpdateTime: {
+      type: Date,
+    },
+    isZoraToken: {
+      type: Boolean,
+      default: false,
+    },
+    creatorAddress: {
+      type: String,
+    },
   },
-  name: {
-    type: String
-  },
-  symbol: {
-    type: String
-  },
-  decimals: {
-    type: Number,
-    default: 18
-  },
-  lastPrice: {
-    type: String
-  },
-  priceUpdateTime: {
-    type: Date
-  },
-  isZoraToken: {
-    type: Boolean,
-    default: false
-  },
-  creatorAddress: {
-    type: String
-  }
-}, { timestamps: true });
+  { timestamps: true }
+);
 
 // Create models
-const User = mongoose.model('User', UserSchema);
-const Transaction = mongoose.model('Transaction', TransactionSchema);
-const Alert = mongoose.model('Alert', AlertSchema);
-const CopyTrade = mongoose.model('CopyTrade', CopyTradeSchema);
-const Token = mongoose.model('Token', TokenSchema);
+const User = mongoose.model("User", UserSchema);
+const Transaction = mongoose.model("Transaction", TransactionSchema);
+const Alert = mongoose.model("Alert", AlertSchema);
+const CopyTrade = mongoose.model("CopyTrade", CopyTradeSchema);
+const Token = mongoose.model("Token", TokenSchema);
 
 /**
  * Initialize database connection
@@ -195,8 +217,9 @@ const Token = mongoose.model('Token', TokenSchema);
  */
 async function initDb(): Promise<any> {
   try {
-    const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/zoracle';
-    
+    const mongoUri =
+      process.env.MONGODB_URI || "mongodb://localhost:27017/zoracle";
+
     await mongoose.connect(mongoUri, {
       serverSelectionTimeoutMS: 15000, // Increase timeout to 15 seconds
       socketTimeoutMS: 30000, // Socket timeout
@@ -208,21 +231,13 @@ async function initDb(): Promise<any> {
       retryWrites: true, // Retry write operations
       retryReads: true, // Retry read operations
     });
-    
-    console.log('✅ MongoDB connected successfully');
+
+    console.log("✅ MongoDB connected successfully");
     return true;
   } catch (error) {
-    console.error('❌ MongoDB connection error:', error);
+    console.error("❌ MongoDB connection error:", error);
     return false;
   }
 }
 
-export { 
-  mongoose,
-  User,
-  Transaction,
-  Alert,
-  CopyTrade,
-  Token,
-  initDb
- }; 
+export { mongoose, User, Transaction, Alert, CopyTrade, Token, initDb };
