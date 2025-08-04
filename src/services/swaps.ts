@@ -13,10 +13,15 @@ const SWAP_API_BASE_URL = process.env.ZORACLE_API_URL || 'https://usezoracle-tel
  */
 async function getTokenAddresses(network: string = 'base'): Promise<any> {
   try {
-    const response = await axios.get(`${SWAP_API_BASE_URL}/api/swaps/tokens/${network}`, {
-      timeout: 10000,
-      validateStatus: status => status < 500 // Don't throw on 4xx errors
-    });
+    const response = await Promise.race([
+      axios.get(`${SWAP_API_BASE_URL}/api/swaps/tokens/${network}`, {
+        timeout: 12000, // Increased timeout to 12 seconds
+        validateStatus: status => status < 500 // Don't throw on 4xx errors
+      }),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Token addresses request timed out')), 12000)
+      )
+    ]) as any;
 
     if (!response.data || !response.data.success) {
       throw new Error(response.data?.message || 'Failed to get token addresses');
@@ -62,17 +67,22 @@ async function getSwapPrice(accountName: string, fromToken: string, toToken: str
       toToken = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
     }
 
-    const response = await axios.get(`${SWAP_API_BASE_URL}/api/swaps/price`, {
-      params: {
-        accountName,
-        fromToken,
-        toToken,
-        fromAmount,
-        network
-      },
-      timeout: 15000,
-      validateStatus: status => status < 500 // Don't throw on 4xx errors
-    });
+    const response = await Promise.race([
+      axios.get(`${SWAP_API_BASE_URL}/api/swaps/price`, {
+        params: {
+          accountName,
+          fromToken,
+          toToken,
+          fromAmount,
+          network
+        },
+        timeout: 18000, // Increased timeout to 18 seconds
+        validateStatus: status => status < 500 // Don't throw on 4xx errors
+      }),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Swap price request timed out')), 18000)
+      )
+    ]) as any;
 
     if (!response.data || !response.data.success) {
       throw new Error(response.data?.message || 'Failed to get swap price');

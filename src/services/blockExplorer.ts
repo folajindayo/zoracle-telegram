@@ -38,18 +38,23 @@ export async function getTransactions(address: string, limit = 10, forceRefresh 
     // Using standard eth_getBalance method first, then fallback to Advanced API
     try {
       // First try to get basic account info
-      const balanceResponse = await axios.post(ANKR_API, {
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'eth_getBalance',
-        params: [address, 'latest']
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${CONFIG.ANKR_API_KEY}`
-        },
-        timeout: 10000 // 10 second timeout
-      });
+      const balanceResponse = await Promise.race([
+        axios.post(ANKR_API, {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'eth_getBalance',
+          params: [address, 'latest']
+        }, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${CONFIG.ANKR_API_KEY}`
+          },
+          timeout: 12000 // Increased timeout to 12 seconds
+        }),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Ankr API request timed out')), 12000)
+        )
+      ]) as any;
 
       // If balance call succeeds, proceed to get transactions via Advanced API
       if (balanceResponse.data && balanceResponse.data.result && !balanceResponse.data.error) {
@@ -131,23 +136,28 @@ function formatAnkrTransactions(rawTxs: any[]): any[] {
 async function getAnkrAccountTransactions(address: string, limit = 10): Promise<any> {
   try {
     // Using Ankr's Advanced API for account transactions with your API key
-    const response = await axios.post(ANKR_ADVANCED_API, {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'ankr_getTransactionsByAddress',
-      params: {
-        blockchain: "base",
-        address: address,
-        pageSize: limit,
-        pageToken: ""
-      }
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${CONFIG.ANKR_API_KEY}`
-      },
-      timeout: 15000 // 15 second timeout for advanced API
-    });
+    const response = await Promise.race([
+      axios.post(ANKR_ADVANCED_API, {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'ankr_getTransactionsByAddress',
+        params: {
+          blockchain: "base",
+          address: address,
+          pageSize: limit,
+          pageToken: ""
+        }
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${CONFIG.ANKR_API_KEY}`
+        },
+        timeout: 18000 // Increased timeout to 18 seconds for advanced API
+      }),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Ankr Advanced API request timed out')), 18000)
+      )
+    ]) as any;
 
     // Check if response is valid
     if (response.data && response.data.result && response.data.result.transactions) {
@@ -336,22 +346,27 @@ export async function getTokenData(address: string): Promise<any> {
     
     try {
       // Using Ankr's Advanced API for token balances with your API key
-      const response = await axios.post(ANKR_ADVANCED_API, {
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'ankr_getAccountBalance',
-        params: {
-          blockchain: "base",
-          walletAddress: address,
-          onlyWhitelisted: false
-        }
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${CONFIG.ANKR_API_KEY}`
-        },
-        timeout: 15000 // 15 second timeout for advanced API
-      });
+      const response = await Promise.race([
+        axios.post(ANKR_ADVANCED_API, {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'ankr_getAccountBalance',
+          params: {
+            blockchain: "base",
+            walletAddress: address,
+            onlyWhitelisted: false
+          }
+        }, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${CONFIG.ANKR_API_KEY}`
+          },
+          timeout: 18000 // Increased timeout to 18 seconds for advanced API
+        }),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Ankr token data request timed out')), 18000)
+        )
+      ]) as any;
       
       // Check if response is valid
       if (response.data && response.data.result && response.data.result.assets) {

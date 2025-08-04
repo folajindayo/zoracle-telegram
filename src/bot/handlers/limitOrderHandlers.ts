@@ -236,7 +236,8 @@ export async function handleLimitOrderType(
   bot: TelegramBot,
   chatId: number,
   orderType: 'buy' | 'sell',
-  users: Map<string, UserData>
+  users: Map<string, UserData>,
+  conversationStates: Map<number, string>
 ): Promise<void> {
   try {
     const userId = chatId.toString();
@@ -262,7 +263,6 @@ export async function handleLimitOrderType(
     );
 
     // Set conversation state
-    const conversationStates = new Map();
     conversationStates.set(chatId, 'AWAITING_LIMIT_TOKEN_ADDRESS');
   } catch (error) {
     console.error("Error handling limit order type:", error);
@@ -284,10 +284,13 @@ export async function handleLimitOrderTokenAddress(
   bot: TelegramBot,
   chatId: number,
   tokenAddress: string,
-  users: Map<string, UserData>
+  users: Map<string, UserData>,
+  conversationStates: Map<number, string>
 ): Promise<void> {
   try {
     const userId = chatId.toString();
+    
+    console.log(`🔍 Processing token address: ${tokenAddress} for user ${userId}`);
     
     // Validate token address
     if (!tokenAddress || tokenAddress.length < 10) {
@@ -307,7 +310,10 @@ export async function handleLimitOrderTokenAddress(
     }
 
     // Get token info from GeckoTerminal
+    console.log(`🔍 Fetching token data for address: ${tokenAddress}`);
     const tokenData = await geckoTerminal.getTokenData('base', tokenAddress);
+    
+    console.log(`🔍 Token data result:`, tokenData.success ? 'Success' : 'Failed');
     
     if (!tokenData.success) {
       bot.sendMessage(
@@ -353,7 +359,6 @@ export async function handleLimitOrderTokenAddress(
     );
 
     // Set conversation state
-    const conversationStates = new Map();
     conversationStates.set(chatId, 'AWAITING_LIMIT_AMOUNT');
   } catch (error) {
     console.error("Error handling token address:", error);
@@ -375,7 +380,8 @@ export async function handleLimitOrderAmount(
   bot: TelegramBot,
   chatId: number,
   amount: string,
-  users: Map<string, UserData>
+  users: Map<string, UserData>,
+  conversationStates: Map<number, string>
 ): Promise<void> {
   try {
     const userId = chatId.toString();
@@ -423,7 +429,6 @@ export async function handleLimitOrderAmount(
     );
 
     // Set conversation state
-    const conversationStates = new Map();
     conversationStates.set(chatId, 'AWAITING_LIMIT_PRICE');
   } catch (error) {
     console.error("Error handling amount:", error);
@@ -445,7 +450,8 @@ export async function handleLimitOrderPrice(
   bot: TelegramBot,
   chatId: number,
   price: string,
-  users: Map<string, UserData>
+  users: Map<string, UserData>,
+  conversationStates: Map<number, string>
 ): Promise<void> {
   try {
     const userId = chatId.toString();
@@ -528,7 +534,6 @@ export async function handleLimitOrderPrice(
     );
 
     // Set conversation state
-    const conversationStates = new Map();
     conversationStates.set(chatId, 'AWAITING_LIMIT_CONFIRMATION');
   } catch (error) {
     console.error("Error handling price:", error);
@@ -549,7 +554,8 @@ export async function handleLimitOrderPrice(
 export async function handleLimitOrderConfirmation(
   bot: TelegramBot,
   chatId: number,
-  users: Map<string, UserData>
+  users: Map<string, UserData>,
+  conversationStates: Map<number, string>
 ): Promise<void> {
   try {
     const userId = chatId.toString();
@@ -621,8 +627,9 @@ export async function handleLimitOrderConfirmation(
       });
     }
 
-    // Clear user data
+    // Clear user data and conversation state
     users.delete(userId);
+    conversationStates.delete(chatId);
   } catch (error) {
     console.error("Error confirming limit order:", error);
     bot.sendMessage(

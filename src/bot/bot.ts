@@ -621,13 +621,13 @@ bot.on("callback_query", async (callbackQuery) => {
     await limitOrderHandlers.handleShowLimitOrders(bot, chatId, users);
   } else if (data === "limit_buy") {
     const limitOrderHandlers = await import('./handlers/limitOrderHandlers');
-    await limitOrderHandlers.handleLimitOrderType(bot, chatId, 'buy', users);
+    await limitOrderHandlers.handleLimitOrderType(bot, chatId, 'buy', users, conversationStates);
   } else if (data === "limit_sell") {
     const limitOrderHandlers = await import('./handlers/limitOrderHandlers');
-    await limitOrderHandlers.handleLimitOrderType(bot, chatId, 'sell', users);
+    await limitOrderHandlers.handleLimitOrderType(bot, chatId, 'sell', users, conversationStates);
   } else if (data === "limit_confirm") {
     const limitOrderHandlers = await import('./handlers/limitOrderHandlers');
-    await limitOrderHandlers.handleLimitOrderConfirmation(bot, chatId, users);
+    await limitOrderHandlers.handleLimitOrderConfirmation(bot, chatId, users, conversationStates);
   } else if (data === "limit_cancel") {
     bot.sendMessage(chatId, "❌ Limit order creation cancelled.", {
       parse_mode: "HTML" as const,
@@ -768,6 +768,8 @@ bot.on('message', async (msg) => {
   
   // Check if user is in swap conversation state
   const conversationState = conversationStates.get(chatId);
+  
+  console.log(`🔍 Conversation state for ${chatId}: ${conversationState}`);
   
   if (conversationState === 'AWAITING_SWAP_AMOUNT') {
     try {
@@ -1048,21 +1050,22 @@ bot.on('message', async (msg) => {
       conversationStates.delete(chatId);
     }
   } else if (conversationState === 'AWAITING_LIMIT_TOKEN_ADDRESS') {
+    console.log(`🔍 Handling limit order token address input: ${text}`);
     // Handle limit order token address input
     const limitOrderHandlers = await import('./handlers/limitOrderHandlers');
-    await limitOrderHandlers.handleLimitOrderTokenAddress(bot, chatId, text, users);
+    await limitOrderHandlers.handleLimitOrderTokenAddress(bot, chatId, text, users, conversationStates);
   } else if (conversationState === 'AWAITING_LIMIT_AMOUNT') {
     // Handle limit order amount input
     const limitOrderHandlers = await import('./handlers/limitOrderHandlers');
-    await limitOrderHandlers.handleLimitOrderAmount(bot, chatId, text, users);
+    await limitOrderHandlers.handleLimitOrderAmount(bot, chatId, text, users, conversationStates);
   } else if (conversationState === 'AWAITING_LIMIT_PRICE') {
     // Handle limit order price input
     const limitOrderHandlers = await import('./handlers/limitOrderHandlers');
-    await limitOrderHandlers.handleLimitOrderPrice(bot, chatId, text, users);
+    await limitOrderHandlers.handleLimitOrderPrice(bot, chatId, text, users, conversationStates);
   } else if (conversationState === 'AWAITING_LIMIT_CONFIRMATION') {
     // Handle limit order confirmation
     const limitOrderHandlers = await import('./handlers/limitOrderHandlers');
-    await limitOrderHandlers.handleLimitOrderConfirmation(bot, chatId, users);
+    await limitOrderHandlers.handleLimitOrderConfirmation(bot, chatId, users, conversationStates);
   }
 });
 
