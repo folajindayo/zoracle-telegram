@@ -395,3 +395,40 @@ export async function handleRefreshHistory(
     );
   }
 }
+
+// Initialize portfolio handlers
+export default function initPortfolioHandlers(
+  bot: TelegramBot,
+  users: Map<string, any>
+): void {
+  // Handle callback queries for portfolio-related actions
+  bot.on("callback_query", async (callbackQuery) => {
+    if (!callbackQuery.data || !callbackQuery.message) return;
+
+    const chatId = callbackQuery.message.chat.id;
+    const data = callbackQuery.data;
+
+    try {
+      switch (data) {
+        case "show_portfolio":
+          await handleShowPortfolio(bot, chatId, users);
+          break;
+        case "show_transactions":
+          await handleShowTransactions(bot, chatId, callbackQuery);
+          break;
+        case "refresh_history":
+          await handleRefreshHistory(bot, chatId, callbackQuery);
+          break;
+        default:
+          break;
+      }
+    } catch (error) {
+      console.error("Error handling portfolio callback:", error);
+      bot.sendMessage(
+        chatId,
+        "❌ An error occurred while processing your request. Please try again.",
+        { parse_mode: "HTML" as const }
+      );
+    }
+  });
+}

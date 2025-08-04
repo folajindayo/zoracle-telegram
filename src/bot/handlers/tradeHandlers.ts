@@ -5,6 +5,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import { ethers } from 'ethers';
 import { UserData } from './walletHandlers';
 import { getTranslatedMessage } from './walletHandlers';
+import axios from 'axios';
 
 export async function handleShowTradeOptions(
   bot: TelegramBot,
@@ -15,16 +16,12 @@ export async function handleShowTradeOptions(
     const userId = callbackQuery.from.id.toString();
     const tradingTitle = await getTranslatedMessage('trading_title', userId);
     const tradingSubtitle = await getTranslatedMessage('trading_subtitle', userId);
-    const buyTokens = await getTranslatedMessage('buy_tokens', userId);
-    const sellTokens = await getTranslatedMessage('sell_tokens', userId);
     const swapTokens = await getTranslatedMessage('swap_tokens', userId);
     const backToMain = await getTranslatedMessage('back_to_main', userId);
     
     const tradeOptions = {
       reply_markup: {
         inline_keyboard: [
-          [{ text: buyTokens, callback_data: 'trade_buy' }],
-          [{ text: sellTokens, callback_data: 'trade_sell' }],
           [{ text: swapTokens, callback_data: 'trade_swap' }],
           [{ text: backToMain, callback_data: 'back_to_main' }]
         ]
@@ -39,8 +36,6 @@ export async function handleShowTradeOptions(
     const tradeOptions = {
       reply_markup: {
         inline_keyboard: [
-          [{ text: '💵 Buy Tokens', callback_data: 'trade_buy' }],
-          [{ text: '💸 Sell Tokens', callback_data: 'trade_sell' }],
           [{ text: '🔄 Swap Tokens', callback_data: 'trade_swap' }],
           [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
         ]
@@ -52,91 +47,163 @@ export async function handleShowTradeOptions(
   }
 }
 
-export async function handleTradeBuy(
-  bot: TelegramBot,
-  chatId: number,
-  conversationStates: Map<number, any>
-): Promise<void> {
-  conversationStates.set(chatId, 'AWAITING_BUY_TOKEN');
-  bot.sendMessage(chatId, '💵 <b>Buy Tokens</b>\n\nPlease enter the token address you want to buy:', {
-    parse_mode: 'HTML' as const,
-    reply_markup: {
-      force_reply: true
-    }
-  });
-}
-
 export async function handleTradeSwap(
   bot: TelegramBot,
   chatId: number,
   users: Map<string, UserData>
 ): Promise<void> {
   try {
-    // Import the swaps service
-    const swapService = await import('../../services/swaps');
+    const userId = chatId.toString();
     
     // Show a loading message
-    const loadingMessage = await bot.sendMessage(chatId, '⏳ Loading available tokens...');
+    const loadingMessage = await bot.sendMessage(chatId, '⏳ Loading your portfolio tokens...');
     
-    // Get the common tokens for the base network
-    const tokensResult = await swapService.getTokenAddresses('base');
+    // Get user's wallet address first
+    const walletManager = await import('../../services/cdpWallet');
     
-    // Delete the loading message
-    bot.deleteMessage(chatId, loadingMessage.message_id).catch(e => console.error('Error deleting loading message:', e));
-    
-    if (tokensResult.success && tokensResult.tokens) {
-      const tokens = tokensResult.tokens || {};
-      
-      // Create buttons for common tokens
-      const tokenButtons = [];
-      
-      // ETH is special
-      tokenButtons.push([{ text: '💠 ETH (Native)', callback_data: 'swap_from_ETH' }]);
-      
-      // Add other common tokens
-      if (typeof tokens === 'object' && tokens !== null) {
-        for (const [symbol, address] of Object.entries(tokens)) {
-          if (symbol !== 'ETH') { // Skip ETH as we added it separately
-            tokenButtons.push([{ text: `${symbol}`, callback_data: `swap_from_${symbol}` }]);
+    // Check if user has a wallet
+    if (!walletManager.userHasWallet(userId)) {
+      bot.deleteMessage(chatId, loadingMessage.message_id).catch(e => 
+        console.error('Error deleting loading message:', e)
+      );
+      bot.sendMessage(
+        chatId,
+        "❌ <b>No Wallet Found</b>\n\nYou need to create a wallet first to swap tokens.",
+        {
+          parse_mode: "HTML" as const,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "💼 Create Wallet", callback_data: "wallet_create" }],
+              [{ text: "🏠 Back to Main Menu", callback_data: "back_to_main" }]
+            ]
           }
         }
+      );
+      return;
+    }
+
+    // Get user's portfolio data using the same API call as portfolio handlers
+    const userName = `zoracle-${userId}`;
+    const baseURL = process.env.ZORACLE_API_URL || 'https://usezoracle-telegrambot-production.up.railway.app';
+    
+    const response = await axios.get(`${baseURL}/api/balances/${userName}`, {
+      timeout: 10000,
+      validateStatus: (status) => status < 500, // Don't throw on 4xx errors
+    });
+
+    // Delete the loading message
+    bot.deleteMessage(chatId, loadingMessage.message_id).catch(e => 
+      console.error('Error deleting loading message:', e)
+    );
+
+    if (!response.data || !response.data.success) {
+      bot.sendMessage(
+        chatId,
+        `❌ Failed to load portfolio: ${response.data?.message || "Unknown error"}`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Try Again', callback_data: 'trade_swap' }],
+              [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+            ]
+          }
+        }
+      );
+      return;
+    }
+
+    // Process the balance data from API response
+    const balanceData = response.data.data;
+    const balances = balanceData?.balances || [];
+
+    if (balances.length > 0) {
+      // Create buttons for user's actual tokens
+      const tokenButtons = [];
+      
+      // Add each token from user's portfolio
+      for (const balance of balances) {
+        const token = balance.token;
+        const amount = balance.amount;
+        const usdValue = balance.usdValue || 0;
+        const balanceNum = parseFloat(amount.formatted);
+        
+        // Format balance with smart decimal places
+        let formattedBalance;
+        if (balanceNum === 0) {
+          formattedBalance = "0";
+        } else if (balanceNum < 0.000001) {
+          formattedBalance = balanceNum.toExponential(2);
+        } else if (balanceNum < 0.01) {
+          formattedBalance = balanceNum.toFixed(8);
+        } else if (balanceNum < 1) {
+          formattedBalance = balanceNum.toFixed(6);
+        } else if (balanceNum < 1000) {
+          formattedBalance = balanceNum.toFixed(4);
+        } else {
+          formattedBalance = balanceNum.toFixed(2);
+        }
+        
+        // Format USD value
+        const formattedUsdValue = usdValue < 0.01 ? usdValue.toFixed(4) : usdValue.toFixed(2);
+        
+        const displayText = `${token.symbol} (${formattedBalance}) - $${formattedUsdValue}`;
+        
+        tokenButtons.push([{ 
+          text: displayText, 
+          callback_data: `swap_from_${token.symbol}` 
+        }]);
       }
       
       // Add back button
       tokenButtons.push([{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]);
       
       // Store user's tokens for the session
-      if (!users.has(chatId.toString())) {
-        users.set(chatId.toString(), {});
+      if (!users.has(userId)) {
+        users.set(userId, {});
       }
-      const userData = users.get(chatId.toString());
-      userData.availableTokens = tokens;
+      const userData = users.get(userId);
+      userData.availableTokens = balances;
       
-      bot.sendMessage(chatId, '🔄 <b>Swap Tokens</b>\n\nSelect a token to swap <b>from</b>:', {
-        parse_mode: 'HTML' as const,
-        reply_markup: {
-          inline_keyboard: tokenButtons
+      bot.sendMessage(
+        chatId, 
+        '🔄 <b>Swap Tokens</b>\n\nSelect a token from your portfolio to swap <b>from</b>:', 
+        {
+          parse_mode: 'HTML' as const,
+          reply_markup: {
+            inline_keyboard: tokenButtons
+          }
         }
-      });
+      );
     } else {
-      bot.sendMessage(chatId, `❌ Error loading tokens: ${tokensResult.message}`, {
+      // No tokens found in portfolio
+      bot.sendMessage(
+        chatId, 
+        '❌ <b>No Tokens Found</b>\n\nYour portfolio is empty. You need to have tokens to swap.',
+        {
+          parse_mode: "HTML" as const,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Refresh Portfolio', callback_data: 'show_portfolio' }],
+              [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+            ]
+          }
+        }
+      );
+    }
+  } catch (error) {
+    console.error('Error loading user tokens for swap:', error);
+    bot.sendMessage(
+      chatId, 
+      `❌ Error loading your tokens: ${error.message}`, 
+      {
         reply_markup: {
           inline_keyboard: [
             [{ text: '🔄 Try Again', callback_data: 'trade_swap' }],
             [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
           ]
         }
-      });
-    }
-  } catch (error) {
-    console.error('Error initializing token swap:', error);
-    bot.sendMessage(chatId, `❌ Error initializing swap: ${error.message}`, {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
-        ]
       }
-    });
+    );
   }
 }
 
@@ -144,7 +211,8 @@ export async function handleSwapFrom(
   bot: TelegramBot,
   chatId: number,
   action: string,
-  users: Map<string, UserData>
+  users: Map<string, UserData>,
+  conversationStates: Map<number, any>
 ): Promise<void> {
   try {
     // Extract the token symbol from the callback data
@@ -159,44 +227,17 @@ export async function handleSwapFrom(
     // Store the fromToken for the session
     userData.swapFromToken = fromToken;
     
-    // Get available tokens with fallback
-    const tokens = userData.availableTokens || {
-      ETH: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE',
-      WETH: '0x4200000000000000000000000000000000000006',
-      USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-      USDT: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA'
-    };
+    // Set the conversation state for token address input
+    conversationStates.set(chatId, 'AWAITING_TOKEN_ADDRESS');
     
-    // Create buttons for tokens to swap to
-    const tokenButtons = [];
-    
-    // Add ETH if from token isn't ETH
-    if (fromToken !== 'ETH') {
-      tokenButtons.push([{ text: '💠 ETH (Native)', callback_data: 'swap_to_ETH' }]);
-    }
-    
-    // Add other tokens except the from token
-    if (typeof tokens === 'object' && tokens !== null) {
-      for (const [symbol, address] of Object.entries(tokens)) {
-        if (symbol !== 'ETH' && symbol !== fromToken) {
-          tokenButtons.push([{ text: symbol, callback_data: `swap_to_${symbol}` }]);
-        }
-      }
-    }
-    
-    // Add custom token option for sniping
-    tokenButtons.push([{ text: '🎯 Custom Token (Snipe)', callback_data: 'swap_to_custom' }]);
-    
-    // Add back buttons
-    tokenButtons.push([
-      { text: '⬅️ Different Source', callback_data: 'trade_swap' },
-      { text: '🏠 Back to Trading', callback_data: 'show_trade_options' }
-    ]);
-    
-    bot.sendMessage(chatId, `🔄 <b>Swap Tokens</b>\n\nSwapping from <b>${fromToken}</b>\n\nSelect a token to swap <b>to</b>:`, {
+    // Send message asking for token address
+    bot.sendMessage(chatId, `🎯 <b>Token Swap</b>\n\nSwapping from <b>${fromToken}</b>\n\nPlease enter the contract address of the token you want to swap to:\n\n<i>Example: 0x1234567890123456789012345678901234567890</i>`, {
       parse_mode: 'HTML' as const,
       reply_markup: {
-        inline_keyboard: tokenButtons
+        inline_keyboard: [
+          [{ text: '⬅️ Different Source', callback_data: 'trade_swap' }],
+          [{ text: '🏠 Back to Trading', callback_data: 'show_trade_options' }]
+        ]
       }
     });
   } catch (error) {
@@ -308,43 +349,6 @@ export async function handleSwapTo(
   }
 }
 
-export async function handleTradeSell(
-  bot: TelegramBot,
-  chatId: number,
-  users: Map<string, UserData>
-): Promise<void> {
-  try {
-    const portfolio = await import('../../services/portfolio');
-    const portfolioData = await portfolio.getPortfolio(chatId.toString());
-    
-    if (portfolioData.success && portfolioData.tokens && portfolioData.tokens.length > 0) {
-      const tokenButtons = portfolioData.tokens.map(token => {
-        return [{ text: `${token.symbol} (${token.balance})`, callback_data: `sell_token_${token.address}` }];
-      });
-      
-      tokenButtons.push([{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]);
-      
-      bot.sendMessage(chatId, '💸 *Sell Tokens*\n\nSelect a token to sell:', {
-        parse_mode: 'HTML' as const,
-        reply_markup: {
-          inline_keyboard: tokenButtons
-        }
-      });
-    } else {
-      bot.sendMessage(chatId, '❌ No tokens found in your portfolio.', {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🏠 Back to Main Menu', callback_data: 'back_to_main' }]
-          ]
-        }
-      });
-    }
-  } catch (error) {
-    console.error('Error getting tokens for sell:', error);
-    bot.sendMessage(chatId, '❌ An error occurred while loading your tokens.');
-  }
-}
-
 export async function handleCancelTrade(
   bot: TelegramBot,
   chatId: number,
@@ -359,4 +363,50 @@ export async function handleCancelTrade(
     }
   });
   conversationStates.delete(chatId);
+} 
+
+// Initialize trade handlers
+export default function initTradeHandlers(
+  bot: TelegramBot,
+  users: Map<string, any>,
+  conversationStates: Map<number, any>
+): void {
+  // Handle callback queries for trade-related actions
+  bot.on("callback_query", async (callbackQuery) => {
+    if (!callbackQuery.data || !callbackQuery.message) return;
+
+    const chatId = callbackQuery.message.chat.id;
+    const data = callbackQuery.data;
+
+    try {
+      switch (data) {
+        case "show_trade_options":
+          await handleShowTradeOptions(bot, chatId, callbackQuery);
+          break;
+        case "trade_swap":
+          await handleTradeSwap(bot, chatId, users);
+          break;
+        case "trade_cancel":
+          await handleCancelTrade(bot, chatId, conversationStates);
+          break;
+        default:
+          // Handle dynamic swap actions
+          if (data.startsWith("swap_from_")) {
+            await handleSwapFrom(bot, chatId, data, users, conversationStates);
+          } else if (data.startsWith("swap_to_")) {
+            await handleSwapTo(bot, chatId, data, users, conversationStates);
+          } else if (data === "swap_to_custom") {
+            await handleSwapToCustom(bot, chatId, users, conversationStates);
+          }
+          break;
+      }
+    } catch (error) {
+      console.error("Error handling trade callback:", error);
+      bot.sendMessage(
+        chatId,
+        "❌ An error occurred while processing your request. Please try again.",
+        { parse_mode: "HTML" as const }
+      );
+    }
+  });
 } 

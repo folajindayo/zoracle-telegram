@@ -1,6 +1,7 @@
 /**
  * Alert Handlers for Zoracle Telegram Bot
  */
+import TelegramBot from "node-telegram-bot-api";
 import { ethers } from "ethers";
 import { CONFIG } from "../../config";
 import {
@@ -22,26 +23,115 @@ const ALERT_STATES = {
 // In-memory alert state storage
 const alertStates = new Map();
 
-module.exports = (bot, users) => {
-  // Alerts command
-  bot.onText(/\/alerts/, async (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id.toString();
+// Handler functions
+export async function handleShowAlerts(
+  bot: TelegramBot,
+  chatId: number,
+  callbackQuery: any
+): Promise<void> {
+  const userId = callbackQuery.from.id.toString();
+  
+  // Get user's alerts
+  const userAlerts = alerts.get(userId) || [];
 
-    // Check if user has a wallet
-    const walletManager = await import("../../services/cdpWallet");
+  if (userAlerts.length === 0) {
+    const options = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "➕ Add Alert", callback_data: "add_alert" }],
+        ],
+      },
+    };
 
-    if (!walletManager.userHasWallet(userId)) {
-      bot.sendMessage(
-        chatId,
-        "You don't have a wallet set up yet. Use /wallet to set up a wallet."
-      );
-      return;
+    bot.sendMessage(chatId, "You don't have any alerts set up yet.", options);
+    return;
+  }
+
+  // Build alerts message
+  let message = "🔔 <b>Your Alerts</b>\n\n";
+
+  for (let i = 0; i < userAlerts.length; i++) {
+    const alert = userAlerts[i];
+    message += `<b>${i + 1}. ${alert.tokenInfo.name} (${
+      alert.tokenInfo.symbol
+    })</b>\n`;
+
+    if (alert.priceHigh) {
+      message += `Price Above: ${alert.priceHigh} ETH\n`;
     }
 
-    // Get user's alerts
-    const userAlerts = alerts.get(userId) || [];
+    if (alert.priceLow) {
+      message += `Price Below: ${alert.priceLow} ETH\n`;
+    }
 
+    message += "\n";
+  }
+
+  // Add inline keyboard buttons for managing alerts
+  const inlineKeyboard = [
+    [{ text: "➕ Add Alert", callback_data: "add_alert" }],
+  ];
+
+  // Add a remove button for each alert
+  for (let i = 0; i < userAlerts.length; i++) {
+    inlineKeyboard.push([
+      {
+        text: `❌ Remove Alert ${i + 1}`,
+        callback_data: `remove_alert_${i}`,
+      },
+    ]);
+  }
+
+  const options = {
+    parse_mode: "HTML" as const,
+    reply_markup: {
+      inline_keyboard: inlineKeyboard,
+    },
+  };
+
+  bot.sendMessage(chatId, message, options);
+}
+
+export async function handleAddAlert(
+  bot: TelegramBot,
+  chatId: number,
+  callbackQuery: any
+): Promise<void> {
+  const userId = callbackQuery.from.id.toString();
+  
+  // Start alert creation flow
+  alertStates.set(userId, { state: ALERT_STATES.AWAITING_TOKEN });
+
+  bot.sendMessage(
+    chatId,
+    "Please enter the token address you want to set an alert for:"
+  );
+}
+
+export async function handleRemoveAlert(
+  bot: TelegramBot,
+  chatId: number,
+  callbackQuery: any,
+  alertIndex: number
+): Promise<void> {
+  const userId = callbackQuery.from.id.toString();
+  
+  // Get user's alerts
+  const userAlerts = alerts.get(userId) || [];
+
+  if (alertIndex >= 0 && alertIndex < userAlerts.length) {
+    // Remove the alert
+    const removedAlert = userAlerts.splice(alertIndex, 1)[0];
+
+    // Update alerts
+    alerts.set(userId, userAlerts);
+
+    bot.answerCallbackQuery(callbackQuery.id, {
+      text: `Alert for ${removedAlert.tokenInfo.symbol} removed!`,
+      show_alert: true,
+    });
+
+    // Update the message
     if (userAlerts.length === 0) {
       const options = {
         reply_markup: {
@@ -51,217 +141,100 @@ module.exports = (bot, users) => {
         },
       };
 
-      bot.sendMessage(chatId, "You don't have any alerts set up yet.", options);
-      return;
-    }
+      bot.editMessageText("You don't have any alerts set up yet.", {
+        chat_id: chatId,
+        message_id: callbackQuery.message.message_id,
+        ...options,
+      });
+    } else {
+      // Rebuild alerts message
+      let message = "🔔 <b>Your Alerts</b>\n\n";
 
-    // Build alerts message
-    let message = "🔔 <b>Your Alerts</b>\n\n";
+      for (let i = 0; i < userAlerts.length; i++) {
+        const alert = userAlerts[i];
+        message += `<b>${i + 1}. ${alert.tokenInfo.name} (${
+          alert.tokenInfo.symbol
+        })</b>\n`;
 
-    for (let i = 0; i < userAlerts.length; i++) {
-      const alert = userAlerts[i];
-      message += `<b>${i + 1}. ${alert.tokenInfo.name} (${
-        alert.tokenInfo.symbol
-      })</b>\n`;
+        if (alert.priceHigh) {
+          message += `Price Above: ${alert.priceHigh} ETH\n`;
+        }
 
-      if (alert.priceHigh) {
-        message += `Price Above: ${alert.priceHigh} ETH\n`;
+        if (alert.priceLow) {
+          message += `Price Below: ${alert.priceLow} ETH\n`;
+        }
+
+        message += "\n";
       }
 
-      if (alert.priceLow) {
-        message += `Price Below: ${alert.priceLow} ETH\n`;
+      // Add inline keyboard buttons for managing alerts
+      const inlineKeyboard = [
+        [{ text: "➕ Add Alert", callback_data: "add_alert" }],
+      ];
+
+      // Add a remove button for each alert
+      for (let i = 0; i < userAlerts.length; i++) {
+        inlineKeyboard.push([
+          {
+            text: `❌ Remove Alert ${i + 1}`,
+            callback_data: `remove_alert_${i}`,
+          },
+        ]);
       }
 
-      message += "\n";
-    }
-
-    // Add inline keyboard buttons for managing alerts
-    const inlineKeyboard = [
-      [{ text: "➕ Add Alert", callback_data: "add_alert" }],
-    ];
-
-    // Add a remove button for each alert
-    for (let i = 0; i < userAlerts.length; i++) {
-      inlineKeyboard.push([
-        {
-          text: `❌ Remove Alert ${i + 1}`,
-          callback_data: `remove_alert_${i}`,
+      const options = {
+        parse_mode: "HTML" as const,
+        reply_markup: {
+          inline_keyboard: inlineKeyboard,
         },
-      ]);
+      };
+
+      bot.editMessageText(message, {
+        chat_id: chatId,
+        message_id: callbackQuery.message.message_id,
+        ...options,
+      });
     }
+  } else {
+    bot.answerCallbackQuery(callbackQuery.id, { text: "Alert not found." });
+  }
+}
 
-    const options = {
-      parse_mode: "HTML" as const,
-      reply_markup: {
-        inline_keyboard: inlineKeyboard,
-      },
-    };
-
-    bot.sendMessage(chatId, message, options);
-  });
-
-  // Add alert command
-  bot.onText(/\/addalert/, async (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id.toString();
-
-    // Check if user has a wallet
-    const walletManager = await import("../../services/cdpWallet");
-
-    if (!walletManager.userHasWallet(userId)) {
-      bot.sendMessage(
-        chatId,
-        "You don't have a wallet set up yet. Use /wallet to set up a wallet."
-      );
-      return;
-    }
-
-    // Start alert creation flow
-    alertStates.set(userId, { state: ALERT_STATES.AWAITING_TOKEN });
-
-    bot.sendMessage(
-      chatId,
-      "Please enter the token address you want to set an alert for:"
-    );
-  });
-
-  // Handle alert button
+// Initialize alert handlers
+export default function initAlertHandlers(
+  bot: TelegramBot,
+  users: Map<string, any>
+): void {
+  // Handle callback queries for alert-related actions
   bot.on("callback_query", async (callbackQuery) => {
-    const action = callbackQuery.data;
-    const msg = callbackQuery.message;
-    const chatId = msg.chat.id;
-    const userId = callbackQuery.from.id.toString();
+    if (!callbackQuery.data || !callbackQuery.message) return;
 
-    if (action === "add_alert") {
-      // Start alert creation flow
-      alertStates.set(userId, { state: ALERT_STATES.AWAITING_TOKEN });
+    const chatId = callbackQuery.message.chat.id;
+    const data = callbackQuery.data;
 
+    try {
+      switch (data) {
+        case "show_alerts":
+          await handleShowAlerts(bot, chatId, callbackQuery);
+          break;
+        case "add_alert":
+          await handleAddAlert(bot, chatId, callbackQuery);
+          break;
+        default:
+          // Handle dynamic alert actions
+          if (data.startsWith("remove_alert_")) {
+            const alertIndex = parseInt(data.replace("remove_alert_", ""));
+            await handleRemoveAlert(bot, chatId, callbackQuery, alertIndex);
+          }
+          break;
+      }
+    } catch (error) {
+      console.error("Error handling alert callback:", error);
       bot.sendMessage(
         chatId,
-        "Please enter the token address you want to set an alert for:"
+        "❌ An error occurred while processing your request. Please try again.",
+        { parse_mode: "HTML" as const }
       );
-      bot.answerCallbackQuery(callbackQuery.id);
-    } else if (action.startsWith("remove_alert_")) {
-      const alertIndex = parseInt(action.split("_")[2]);
-
-      // Get user's alerts
-      const userAlerts = alerts.get(userId) || [];
-
-      if (alertIndex >= 0 && alertIndex < userAlerts.length) {
-        // Remove the alert
-        const removedAlert = userAlerts.splice(alertIndex, 1)[0];
-
-        // Update alerts
-        alerts.set(userId, userAlerts);
-
-        bot.answerCallbackQuery(callbackQuery.id, {
-          text: `Alert for ${removedAlert.tokenInfo.symbol} removed!`,
-          show_alert: true,
-        });
-
-        // Update the message
-        if (userAlerts.length === 0) {
-          const options = {
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: "➕ Add Alert", callback_data: "add_alert" }],
-              ],
-            },
-          };
-
-          bot.editMessageText("You don't have any alerts set up yet.", {
-            chat_id: chatId,
-            message_id: msg.message_id,
-            ...options,
-          });
-        } else {
-          // Rebuild alerts message
-          let message = "🔔 *Your Alerts*\n\n";
-
-          for (let i = 0; i < userAlerts.length; i++) {
-            const alert = userAlerts[i];
-            message += `<b>${i + 1}. ${alert.tokenInfo.name} (${
-              alert.tokenInfo.symbol
-            })</b>\n`;
-
-            if (alert.priceHigh) {
-              message += `Price Above: ${alert.priceHigh} ETH\n`;
-            }
-
-            if (alert.priceLow) {
-              message += `Price Below: ${alert.priceLow} ETH\n`;
-            }
-
-            message += "\n";
-          }
-
-          // Add inline keyboard buttons for managing alerts
-          const inlineKeyboard = [
-            [{ text: "➕ Add Alert", callback_data: "add_alert" }],
-          ];
-
-          // Add a remove button for each alert
-          for (let i = 0; i < userAlerts.length; i++) {
-            inlineKeyboard.push([
-              {
-                text: `❌ Remove Alert ${i + 1}`,
-                callback_data: `remove_alert_${i}`,
-              },
-            ]);
-          }
-
-          const options = {
-            parse_mode: "HTML" as const,
-            reply_markup: {
-              inline_keyboard: inlineKeyboard,
-            },
-          };
-
-          bot.editMessageText(message, {
-            chat_id: chatId,
-            message_id: msg.message_id,
-            ...options,
-          });
-        }
-      } else {
-        bot.answerCallbackQuery(callbackQuery.id, { text: "Alert not found." });
-      }
     }
   });
-
-  // Simulate alert checking (in a real implementation, this would run on a schedule)
-  setInterval(() => {
-    // Check all alerts
-    for (const [userId, userAlerts] of alerts.entries()) {
-      for (const alert of userAlerts) {
-        // Simulate price check (in a real implementation, we would fetch the actual price)
-        const currentPrice = Math.random() * 0.5; // Random price between 0 and 0.5 ETH
-
-        // Check if price triggers alert
-        if (alert.priceHigh !== null && currentPrice > alert.priceHigh) {
-          // Price went above threshold
-          const message = `🔔 *Price Alert*\n\n${alert.tokenInfo.name} (${
-            alert.tokenInfo.symbol
-          }) price is now ${currentPrice.toFixed(
-            6
-          )} ETH, which is above your alert threshold of ${
-            alert.priceHigh
-          } ETH.`;
-
-          bot.sendMessage(userId, message, { parse_mode: "HTML" as const });
-        } else if (alert.priceLow !== null && currentPrice < alert.priceLow) {
-          // Price went below threshold
-          const message = `🔔 *Price Alert*\n\n${alert.tokenInfo.name} (${
-            alert.tokenInfo.symbol
-          }) price is now ${currentPrice.toFixed(
-            6
-          )} ETH, which is below your alert threshold of ${
-            alert.priceLow
-          } ETH.`;
-
-          bot.sendMessage(userId, message, { parse_mode: "HTML" as const });
-        }
-      }
-    }
-  }, 60000); // Check every minute (in a real implementation, this would be more sophisticated)
-};
+}

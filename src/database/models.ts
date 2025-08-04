@@ -204,12 +204,193 @@ const TokenSchema = new Schema(
   { timestamps: true }
 );
 
+// Position Schema
+const PositionSchema = new Schema(
+  {
+    telegramId: {
+      type: String,
+      required: true,
+      ref: "User",
+    },
+    tokenAddress: {
+      type: String,
+      required: true,
+    },
+    tokenSymbol: {
+      type: String,
+      required: true,
+    },
+    tokenName: {
+      type: String,
+    },
+    initialAmount: {
+      type: Number,
+      required: true,
+    },
+    initialUsdValue: {
+      type: Number,
+      required: true,
+    },
+    currentAmount: {
+      type: Number,
+      required: true,
+    },
+    currentUsdValue: {
+      type: Number,
+      required: true,
+    },
+    entryPrice: {
+      type: Number,
+      required: true,
+    },
+    currentPrice: {
+      type: Number,
+      required: true,
+    },
+    pnlPercentage: {
+      type: Number,
+      default: 0,
+    },
+    pnlUsd: {
+      type: Number,
+      default: 0,
+    },
+    status: {
+      type: String,
+      enum: ["open", "closed"],
+      default: "open",
+    },
+    entryTime: {
+      type: Date,
+      default: Date.now,
+    },
+    closeTime: {
+      type: Date,
+    },
+    duration: {
+      type: String,
+    },
+    txHash: {
+      type: String,
+    },
+    network: {
+      type: String,
+      required: true,
+      default: "base",
+    },
+    dexToolsUrl: {
+      type: String,
+    },
+    tonviewerUrl: {
+      type: String,
+    },
+    swapUrl: {
+      type: String,
+    },
+    // Additional fields for swap tracking
+    swapType: {
+      type: String,
+      enum: ["buy", "sell"],
+      required: true,
+    },
+    fromToken: {
+      type: String,
+    },
+    toToken: {
+      type: String,
+    },
+    fromAmount: {
+      type: String,
+    },
+    toAmount: {
+      type: String,
+    },
+    slippage: {
+      type: Number,
+    },
+    gasUsed: {
+      type: String,
+    },
+    gasPrice: {
+      type: String,
+    },
+  },
+  { timestamps: true }
+);
+
+// Limit Order Schema
+const LimitOrderSchema = new Schema(
+  {
+    telegramId: {
+      type: String,
+      required: true,
+      ref: "User",
+    },
+    orderType: {
+      type: String,
+      required: true,
+      enum: ["buy", "sell"],
+    },
+    tokenAddress: {
+      type: String,
+      required: true,
+    },
+    tokenSymbol: {
+      type: String,
+      required: true,
+    },
+    tokenName: {
+      type: String,
+    },
+    amount: {
+      type: Number,
+      required: true,
+    },
+    limitPrice: {
+      type: Number,
+      required: true,
+    },
+    totalValue: {
+      type: Number,
+      required: true,
+    },
+    status: {
+      type: String,
+      default: "pending",
+      enum: ["pending", "filled", "cancelled", "expired"],
+    },
+    network: {
+      type: String,
+      default: "base",
+    },
+    txHash: {
+      type: String,
+    },
+    filledAt: {
+      type: Date,
+    },
+    expiresAt: {
+      type: Date,
+    },
+    notes: {
+      type: String,
+    },
+    slippage: {
+      type: Number,
+      default: 1.0,
+    },
+  },
+  { timestamps: true }
+);
+
 // Create models
 const User = mongoose.model("User", UserSchema);
 const Transaction = mongoose.model("Transaction", TransactionSchema);
 const Alert = mongoose.model("Alert", AlertSchema);
 const CopyTrade = mongoose.model("CopyTrade", CopyTradeSchema);
 const Token = mongoose.model("Token", TokenSchema);
+const Position = mongoose.model("Position", PositionSchema);
+const LimitOrder = mongoose.model("LimitOrder", LimitOrderSchema);
 
 /**
  * Initialize database connection
@@ -240,4 +421,4 @@ async function initDb(): Promise<any> {
   }
 }
 
-export { mongoose, User, Transaction, Alert, CopyTrade, Token, initDb };
+export { mongoose, User, Transaction, Alert, CopyTrade, Token, Position, LimitOrder, initDb };
